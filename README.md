@@ -30,8 +30,8 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 Para llevar a cabo el proyecto se han identificado los siguientes recursos:
 
 * **Infraestructura (AWS EC2):**
-    * 1x Instancia `t2.micro` (Ubuntu Server 22.04 LTS).
-    * 1x Instancia `t2.micro` o `t3.micro` (**Windows Server 2022**).
+    * 1x Instancia `t3.micro` (Ubuntu Server 22.04 LTS).
+    * 1x Instancia `t3.micro` (Windows Server 2022).
 * **Software y Servicios:**
     * **Sistemas Operativos:** Linux y Windows Server.
     * **Red:** IPTables, UFW, VPC Routing.
@@ -175,3 +175,30 @@ A continuación se presenta el diagrama topológico de la infraestructura...
 
 ![Diagrama de Topología de Red](imagenes/topologia.png)
 *Figura 1: Topología de red en AWS con segmentación de subredes.*
+
+## 4. Implantación y configuración
+
+En esta fase se detalla el procedimiento técnico ejecutado para el despliegue de la infraestructura, documentando la configuración de los servicios en la nube y las medidas de seguridad aplicadas.
+
+### 4.1. Despliegue de Infraestructura Base en AWS (Arquitectura NAT)
+
+El primer paso del despliegue consistió en aprovisionar el entorno de red aislado mediante la consola de Amazon Web Services, siguiendo las especificaciones del diseño previo.
+
+**1. Diseño de la VPC y Subredes**
+Se ha creado una nube privada virtual (VPC) denominada `VPC-TFG` con el bloque CIDR `10.0.0.0/16`. Dentro de ella, se han configurado dos subredes para separar las funciones de los servidores:
+* **Subred Pública (DMZ):** Rango `10.0.1.0/24`. Destinada a alojar el servidor Ubuntu, que actúa como puerta de enlace (Gateway) y firewall perimetral.
+* **Subred Privada (Intranet):** Rango `10.0.2.0/24`. Destinada al servidor Windows Server, manteniéndolo totalmente aislado del acceso directo desde el exterior para garantizar la seguridad de los datos y servicios de directorio.
+
+**2. Seguridad y Conectividad Externa**
+Para dotar de conectividad controlada a la infraestructura, se han implementado los siguientes recursos:
+* **Internet Gateway (IGW):** Se ha creado y asociado un IGW a la `VPC-TFG` para permitir la salida global a la red pública.
+* **Security Groups:** Se han configurado reglas de entrada (*Inbound Rules*) para permitir todo el tráfico interno dentro de la red `10.0.0.0/16`. Esto permite que el servidor Windows y el Ubuntu se comuniquen sin restricciones a nivel LAN, mientras se mantiene el bloqueo de accesos no autorizados desde el exterior.
+
+**3. Configuración de Tablas de Enrutamiento**
+Se han configurado dos tablas de rutas independientes para dirigir el tráfico de forma segura según la subred:
+* **Tabla de Rutas Pública:** Se ha añadido la regla `0.0.0.0/0 -> Internet Gateway (IGW)`. Esta función permite que los recursos de la subred DMZ (el servidor Ubuntu) tengan acceso directo a Internet.
+* **Tabla de Rutas Privada:** Se ha configurado la regla `0.0.0.0/0 -> Instancia de Ubuntu (ID: i-xxxx)`. Esta configuración obliga a que todo el tráfico saliente del servidor Windows pase obligatoriamente por el servidor Ubuntu para ser enrutado y gestionado.
+
+**4. Desactivación de *Source/Destination Check***
+Una configuración vital realizada sobre la instancia de Ubuntu (Gateway) ha sido la desactivación de la comprobación de origen/destino (*Source/Destination Check*). 
+* *Justificación técnica:* Por defecto, la infraestructura de red de AWS descarta los paquetes que no tengan como destino final la propia instancia que los recibe. Para que el servidor Ubuntu pueda funcionar como enrutador (NAT) y reenviar legítimamente el tráfico originado por el servidor Windows hacia Internet, esta comprobación de seguridad nativa de AWS debe estar deshabilitada.
