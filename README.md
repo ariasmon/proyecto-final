@@ -45,3 +45,53 @@ Una vez completada la instalación, se verificó el correcto funcionamiento del 
 - La correcta resolución de nombres mediante **DNS** dentro de la red privada  
 
 Finalmente, se confirmó que el servidor **Windows mantiene conectividad hacia Internet** a través del servidor Ubuntu configurado previamente como **gateway NAT**, validando así la integración entre la infraestructura de red y los servicios de directorio implementados.
+
+# 4.5 Implementación de Windows Exporter para la Monitorización del Servidor
+
+Con el objetivo de permitir la monitorización del servidor Windows dentro de la infraestructura del proyecto, se implementó **Windows Exporter**, una herramienta que expone métricas del sistema operativo Windows en un formato compatible con sistemas de monitorización.
+
+Windows Exporter recopila información del sistema como el uso de CPU, memoria, disco y red, y la expone a través de un endpoint HTTP interno que puede ser consultado desde la red privada.
+
+## Instalación de Windows Exporter
+
+La instalación se realizó en el servidor **Windows Server 2022** mediante el paquete instalador en formato `.msi`. Durante el proceso de instalación se configuraron los *collectors*, responsables de recopilar diferentes métricas del sistema.
+
+Entre los módulos habilitados se encuentran:
+
+- `cpu` – uso del procesador  
+- `memory` – consumo de memoria RAM  
+- `logical_disk` – espacio disponible y uso de discos  
+- `net` – estadísticas de tráfico de red  
+- `os` – información general del sistema operativo  
+- `system` – estado general del sistema y tiempo de actividad  
+
+Una vez completada la instalación, Windows Exporter se ejecuta automáticamente como un servicio de Windows llamado **windows_exporter**.
+
+## Exposición de métricas
+
+Windows Exporter expone las métricas a través de un servidor HTTP que escucha en el puerto **9182**. Para verificar el correcto funcionamiento del servicio, se accedió desde el propio servidor a:
+
+
+http://localhost:9182/metrics
+
+
+Al abrir esta dirección se muestran múltiples métricas del sistema en formato de texto estructurado, incluyendo información sobre CPU, memoria, discos y estado del sistema.
+
+Ejemplos de métricas visibles:
+
+
+windows_cpu_time_total
+windows_memory_available_bytes
+windows_logical_disk_free_bytes
+windows_os_info
+windows_system_system_up_time
+
+
+## Configuración del firewall
+
+Para permitir que otros equipos dentro de la red privada puedan acceder a las métricas, se creó una regla en el firewall de Windows que permite conexiones entrantes al puerto 9182:
+
+```powershell
+New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+
+Con esto, el servidor Windows queda preparado para exponer sus métricas del sistema de manera centralizada, lo que permitirá su monitorización en futuras fases del proyecto.
