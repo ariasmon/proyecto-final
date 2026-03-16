@@ -126,10 +126,36 @@ Esta aproximación anula la necesidad de intervención manual inicial (SSH/RDP) 
 ## 5. Trabajo pendiente
 
 ### 5.1. Implementación de Active Directory
-- Instalar rol de AD DS en Windows Server.
-- Promocionar el servidor como controlador de dominio.
-- Crear estructura de unidades organizativas (OU).
-- Configurar políticas de grupo (GPO) básicas.
+
+**Estado actual:** Rol AD DS instalado ✓ (Pasos 1-7 completados)
+
+**Pasos pendientes:**
+
+**Paso 8: Promocionar a Controlador de Dominio**
+- Server Manager → Notificación (bandera amarilla) → "Promote this server to a domain controller"
+
+**Paso 9: Configuración del Dominio**
+- Deployment Configuration: Seleccionar "Add a new forest"
+- Root domain name: `tfg.vp.local`
+- Forest/Domain functional level: Windows Server 2016
+- Verificar "DNS Server" y "Global Catalog" marcados
+- Establecer contraseña DSRM (guardar de forma segura)
+- NetBIOS name: `TFG` (auto-generado)
+- Dejar rutas por defecto y confirmar instalación
+
+**Paso 10: Post-Instalación**
+- El servidor se reiniciará automáticamente
+- Login posterior: `TFG\Administrator` (credenciales del dominio)
+
+**Paso 11: Verificación**
+- Confirmar dominio en Propiedades del equipo: `tfg.vp.local`
+- Verificar zona DNS creada
+- Comprobar estructura AD en "Active Directory Users and Computers"
+
+**Paso 12: Configuración Post-Despliegue**
+- Crear estructura de unidades organizativas (OU): Usuarios, Equipos
+- Crear usuarios del dominio
+- Configurar políticas de grupo (GPO) básicas
 
 ### 5.2. Configuración de VPN con WireGuard
 - Instalar WireGuard en el Gateway Ubuntu.
