@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infraestructura TFG (Enfoque GitOps): VPC, Subredes, SGs e Instancias Base'
+
+Parameters:
+  KeyName:
+    Description: Selecciona tu par de claves (.pem) para acceder a las instancias.
+    Type: AWS::EC2::KeyPair::KeyName
+  LatestUbuntuAMI:
+    Description: Busca automaticamente la ultima version de Ubuntu 22.04 LTS.
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+  LatestWindowsAMI:
+    Description: Busca automaticamente la ultima version de Windows Server 2022.
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base'
+
+Resources:
+  # --- 1. RED (VPC Y SUBREDES) ---
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC-TFG
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  SubnetPublica:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subred-Publica-DMZ
+
+  SubnetPrivada:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: Subred-Privada-Intranet
+
+  # --- 2. GRUPOS DE SEGURIDAD ---
+  SGGateway:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Seguridad Ubuntu Gateway (SSH, RDP, Grafana y NAT)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: -1 
+          CidrIp: 10.0.2.0/24
+
+  SGInternal:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Seguridad Windows Interno Aislado
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          SourceSecurityGroupId: !Ref SGGateway
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          SourceSecurityGroupId: !Ref SGGateway
+
+  # --- 3. INSTANCIAS EC2 ---
+  UbuntuGateway:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref LatestUbuntuAMI
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          SubnetId: !Ref SubnetPublica
+          GroupSet: [!Ref SGGateway]
+      SourceDestCheck: false 
+      Tags:
+        - Key: Name
+          Value: Ubuntu-Gateway-TFG
+
+  WindowsInternal:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      ImageId: !Ref LatestWindowsAMI
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          SubnetId: !Ref SubnetPrivada
+          GroupSet: [!Ref SGInternal]
+          PrivateIpAddress: 10.0.2.75 
+      Tags:
+        - Key: Name
+          Value: Windows-AD-TFG
+
+  # --- 4. IP ELASTICA ---
+  ElasticIPGateway:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref UbuntuGateway
+
+  # --- 5. ENRUTAMIENTO (TABLAS DE RUTAS) ---
+  RouteTablePublica:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: RT-Publica
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTablePublica
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  AsociacionPublica:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPublica
+      RouteTableId: !Ref RouteTablePublica
+
+  RouteTablePrivada:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: RT-Privada
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTablePrivada
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref UbuntuGateway 
+
+  AsociacionPrivada:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPrivada
+      RouteTableId: !Ref RouteTablePrivada
+
+Outputs:
+  IPElasticaUbuntu:
+    Description: IP publica fija para conectarse al Gateway (SSH/RDP)
+    Value: !Ref ElasticIPGateway
