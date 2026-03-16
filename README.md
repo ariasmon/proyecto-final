@@ -13,6 +13,8 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **Despliegue de Red (VPC):** Configuración de una nube privada virtual segmentada en subredes pública (DMZ) y privada (Intranet).
 * **Servidor de Borde (Ubuntu Server):** Configuración como NAT Instance, seguridad perimetral (iptables) y despliegue de stack de monitorización (Prometheus + Grafana).
 * **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos (Active Directory).
+* **Active Directory:** Despliegue de dominio Windows para gestión centralizada de identidades.
+* **VPN (WireGuard):** Configuración de túnel VPN para acceso remoto seguro de usuarios al dominio.
 * **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía Port Forwarding en el Gateway).
 * **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway.
 
@@ -23,13 +25,14 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **Software y Servicios:**
     * Red y Automatización: IPTables, VPC Routing, YAML (CloudFormation).
     * Monitorización: Prometheus, Grafana, Alertmanager, Node Exporter, Windows Exporter.
+    * VPN: WireGuard para acceso remoto seguro.
 
 ### 1.4. Restricciones y condicionantes
 * **Económicas:** Viabilidad dentro de la capa gratuita (Free Tier) de AWS siempre que sea posible.
 * **Seguridad:** Administración a través de puertos estándar (22 y 3389) protegidos por Security Groups.
 * **Plazos:** Despliegue funcional antes de la fecha de defensa del TFG.
 
-### 1.6. Cronograma preliminar
+### 1.5. Cronograma preliminar
 | Fase | Tarea Principal | Semanas | Descripción |
 | :--- | :--- | :--- | :--- |
 | Fase 1 | Planificación | 1 - 2 | Definición de alcance y estudio de viabilidad. |
@@ -50,13 +53,18 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **RF-03 (Seguridad de Red):** Gestión del tráfico mediante firewall permitiendo solo administración autorizada.
 * **RF-04 (Monitorización de Tráfico):** Captura de métricas de ancho de banda en la interfaz del Gateway.
 * **RF-05 (Dashboard Unificado):** Grafana debe mostrar el estado de recursos de ambos servidores.
-* **RF-07 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram/Discord) ante anomalías críticas.
-* **RF-08 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP (3389).
+* **RF-06 (Active Directory):** Implementar dominio Windows con AD para gestión centralizada de usuarios y recursos.
+* **RF-07 (Acceso VPN):** Configurar WireGuard para permitir acceso remoto seguro de usuarios al dominio corporativo.
+* **RF-08 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram/Discord) ante anomalías críticas.
+* **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP (3389).
 
 ### 2.2. Requisitos No Funcionales (RNF)
 * **RNF-01 (Aislamiento):** La instancia Windows debe residir en una subred privada sin IP pública directa.
 * **RNF-02 (Inmutabilidad):** Aplicación de principios GitOps para garantizar la consistencia del entorno.
 * **RNF-03 (Disponibilidad):** Los servicios de enrutamiento deben iniciarse automáticamente (systemd).
+* **RNF-04 (Seguridad VPN):** Las conexiones VPN deben utilizar cifrado fuerte. WireGuard emplea criptografía moderna (ChaCha20, Curve25519).
+* **RNF-05 (Rendimiento):** El Gateway debe mantener latencias de enrutamiento aceptables sin afectar significativamente el rendimiento de la red.
+* **RNF-06 (Documentación):** Toda configuración debe estar documentada y versionada para garantizar replicabilidad del entorno.
 
 ---
 
@@ -67,7 +75,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **Subred Pública (DMZ):** `10.0.1.0/24`. Aloja el Gateway Ubuntu con IP Elástica.
 * **Subred Privada (Intranet):** `10.0.2.0/24`. Aloja el Windows Server. Su tráfico `0.0.0.0/0` apunta a la interfaz de red del Ubuntu.
 
-### 3.3. Diseño de Seguridad y Accesos
+### 3.2. Diseño de Seguridad y Accesos
 1. **SG-Gateway (Ubuntu):** Inbound: 22 (SSH), 3389 (RDP Forward), 3000 (Grafana). Outbound: Todo permitido.
 2. **SG-Internal (Windows):** Inbound: 3389 (RDP) e ICMP (Ping) solo desde el SG-Gateway. Outbound: Todo permitido hacia el Gateway.
 
@@ -112,3 +120,20 @@ Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-T
 * El **Windows Server** ejecuta un script de PowerShell en el arranque que localiza la interfaz de red activa, le asigna la IP estática requerida para el Active Directory, configura los servidores DNS y desactiva los perfiles del cortafuegos.
 
 Esta aproximación anula la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio.
+
+---
+
+## 5. Trabajo pendiente
+
+### 5.1. Implementación de Active Directory
+- Instalar rol de AD DS en Windows Server.
+- Promocionar el servidor como controlador de dominio.
+- Crear estructura de unidades organizativas (OU).
+- Configurar políticas de grupo (GPO) básicas.
+
+### 5.2. Configuración de VPN con WireGuard
+- Instalar WireGuard en el Gateway Ubuntu.
+- Generar claves y configurar interfaz VPN.
+- Configurar clientes para acceso remoto.
+- Integrar reglas de firewall para tráfico VPN.
+- Documentar proceso de conexión para usuarios finales.
