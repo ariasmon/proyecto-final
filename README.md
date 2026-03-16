@@ -5,22 +5,23 @@
 En esta fase se establecen las bases del proyecto, definiendo el alcance, los recursos necesarios y las restricciones que guiarán el desarrollo.
 
 ### 1.1. Objetivo
-El objetivo principal es diseñar e implantar una infraestructura de red segura en la nube pública (AWS), utilizando una arquitectura de Gateway Linux (Ubuntu) para proteger y enrutar el tráfico de una subred privada donde reside un servidor Windows. Adicionalmente, se busca implementar un sistema de observabilidad que centralice la monitorización de tráfico y recursos de ambos servidores, integrando mecanismos de alerta temprana ante fallos críticos.
+El objetivo principal es diseñar e implantar una infraestructura de red segura en la nube pública (AWS), utilizando una arquitectura de Gateway Linux (Ubuntu) para proteger y enrutar el tráfico de una subred privada donde reside un servidor Windows. Adicionalmente, se busca implementar un sistema de observabilidad que centralice la monitorización de tráfico y recursos de ambos servidores, integrando mecanismos de alerta temprana ante fallos críticos, todo ello bajo un paradigma de **automatización y GitOps**.
 
 ### 1.2. Alcance del proyecto
 El proyecto contempla la ejecución de las siguientes tareas clave:
+* **Infraestructura como Código (IaC):** Automatización total del despliegue mediante AWS CloudFormation (GitOps).
 * **Despliegue de Red (VPC):** Configuración de una nube privada virtual segmentada en subredes pública (DMZ) y privada (Intranet).
 * **Servidor de Borde (Ubuntu Server):** Configuración como NAT Instance, seguridad perimetral (iptables) y despliegue de stack de monitorización (Prometheus + Grafana).
-* **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos.
+* **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos (Active Directory).
 * **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía Port Forwarding en el Gateway).
 * **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway.
 
 ### 1.3. Recursos identificados (Actualizado)
-* **Infraestructura (AWS EC2):**
+* **Infraestructura (AWS EC2 & CloudFormation):**
     * 1x Instancia **t3.micro** (Ubuntu Server 22.04 LTS) + **IP Elástica**.
     * 1x Instancia **t3.small** (Windows Server 2022). *Nota: Se aumentó de micro a small para garantizar la estabilidad del sistema.*
 * **Software y Servicios:**
-    * Red: IPTables, VPC Routing.
+    * Red y Automatización: IPTables, VPC Routing, YAML (CloudFormation).
     * Monitorización: Prometheus, Grafana, Alertmanager, Node Exporter, Windows Exporter.
 
 ### 1.4. Restricciones y condicionantes
@@ -33,7 +34,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 | :--- | :--- | :--- | :--- |
 | Fase 1 | Planificación | 1 - 2 | Definición de alcance y estudio de viabilidad. |
 | Fase 2 | Diseño | 3 - 4 | Diagramas de red VPC y políticas de seguridad. |
-| Fase 3 | Despliegue Infra | 5 - 6 | Creación de VPC, subredes y lanzamiento de instancias. |
+| Fase 3 | Despliegue Infra | 5 - 6 | Creación de VPC, subredes y automatización IaC. |
 | Fase 4 | Configuración | 7 - 8 | Configuración de NAT, Firewall y Monitorización. |
 | Fase 5 | Accesos | 9 | Habilitación de SSH y RDP mediante Port Forwarding. |
 | Fase 6 | Validación | 10 | Pruebas de conectividad y estrés. |
@@ -45,6 +46,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 
 ### 2.1. Requisitos Funcionales (RF)
 * **RF-01 (Enrutamiento NAT):** El servidor Ubuntu debe actuar como puerta de enlace para la subred privada.
+* **RF-02 (Despliegue Automatizado):** La infraestructura debe poder recrearse de forma idéntica sin intervención manual.
 * **RF-03 (Seguridad de Red):** Gestión del tráfico mediante firewall permitiendo solo administración autorizada.
 * **RF-04 (Monitorización de Tráfico):** Captura de métricas de ancho de banda en la interfaz del Gateway.
 * **RF-05 (Dashboard Unificado):** Grafana debe mostrar el estado de recursos de ambos servidores.
@@ -53,6 +55,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 
 ### 2.2. Requisitos No Funcionales (RNF)
 * **RNF-01 (Aislamiento):** La instancia Windows debe residir en una subred privada sin IP pública directa.
+* **RNF-02 (Inmutabilidad):** Aplicación de principios GitOps para garantizar la consistencia del entorno.
 * **RNF-03 (Disponibilidad):** Los servicios de enrutamiento deben iniciarse automáticamente (systemd).
 
 ---
@@ -74,7 +77,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 
 ### 4.1. Despliegue de Infraestructura Base en AWS
 1. **IP Elástica:** Asociada al Ubuntu para mantener un punto de acceso administrativo fijo.
-2. **IP Estática Windows:** Configurada manualmente como `10.0.2.75` para evitar desincronización de servicios internos.
+2. **IP Estática Windows:** Configurada como `10.0.2.75` para evitar desincronización de servicios internos.
 3. **Source/Destination Check:** Desactivado en la instancia Ubuntu para permitir el funcionamiento del NAT.
 
 ### 4.2. Configuración del Enrutamiento y NAT en Linux
@@ -92,19 +95,20 @@ sudo iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 
 sudo apt update && sudo apt install iptables-persistent -y
 sudo netfilter-persistent save
 ```
-
 ### 4.3. Configuración del Servidor Interno (Windows Server)
 Para garantizar la estabilidad operativa y la conectividad a través del Gateway, se han realizado las siguientes configuraciones críticas:
 
-1. **Optimización de Instancia:**
-   * Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM). Esta actualización técnica asegura que el sistema operativo disponga de recursos suficientes para ejecutar procesos de red y servicios de fondo sin degradación de rendimiento.
+1. **Optimización de Instancia:** Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM).
+2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `127.0.0.1` y `8.8.8.8`.
+3. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell (`Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False`).
 
-2. **Configuración de Red Estática:**
-   * **Direccionamiento IPv4:** Se ha fijado manualmente la IP `10.0.2.75` con máscara de subred `255.255.255.0`.
-   * **Puerta de enlace (Gateway):** Se ha establecido la dirección `10.0.2.1`. Esta configuración permite que el tráfico sea gestionado por el enrutador virtual de la VPC y derivado al Gateway Ubuntu según la tabla de rutas privada definida en AWS.
-   * **Servidores DNS:** Se han configurado `127.0.0.1` y `8.8.8.8` para garantizar la resolución de nombres local y externa durante la fase de despliegue.
+### 4.4. Automatización y Enfoque GitOps (Infraestructura como Código)
+Para garantizar la inmutabilidad y replicabilidad del entorno, se ha adoptado una metodología GitOps utilizando **AWS CloudFormation**. 
 
-3. **Seguridad y Acceso:**
-   * **Gestión del Firewall:** Se ha desactivado el cortafuegos de Windows mediante PowerShell para evitar bloqueos en la comunicación interna con el Gateway y permitir la entrada de tráfico RDP redirigido.
-     * Comando utilizado: `Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False`
-   * **Validación de Conectividad:** Se ha confirmado mediante pruebas de navegación y respuesta ICMP que el servidor tiene salida total a Internet a través del NAT configurado en el Ubuntu, validando así la arquitectura de red híbrida.
+Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tablas de Rutas, Security Groups e Instancias EC2) está definida de forma declarativa en un único archivo YAML (`despliegue-tfg.yaml`).
+
+Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`. Esto permite que, en el momento de crear la pila en AWS, las instancias ejecuten automáticamente sus configuraciones internas:
+* El **Ubuntu Gateway** ejecuta un script bash en el arranque que habilita el reenvío de paquetes IP (`ip_forward`) y establece las reglas de iptables (NAT y Port Forwarding) haciéndolas persistentes.
+* El **Windows Server** ejecuta un script de PowerShell en el arranque que localiza la interfaz de red activa, le asigna la IP estática requerida para el Active Directory, configura los servidores DNS y desactiva los perfiles del cortafuegos.
+
+Esta aproximación anula la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio.
