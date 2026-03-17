@@ -95,3 +95,70 @@ Para permitir que otros equipos dentro de la red privada puedan acceder a las m�
 New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
 
 Con esto, el servidor Windows queda preparado para exponer sus métricas del sistema de manera centralizada, lo que permitirá su monitorización en futuras fases del proyecto.
+
+
+
+# 5. Implementación de Active Directory y configuración básica de seguridad
+
+## 5.1 Estado actual
+
+- Servidor con **Active Directory Domain Services (AD DS)** instalado y promocionado como **Controlador de Dominio**.  
+- Dominio configurado: `tfg.vp.local`  
+- Nivel funcional de dominio y bosque: **Windows Server 2016**  
+- DNS y Global Catalog habilitados.  
+- Inicio de sesión posterior: `TFG\Administrator`.  
+- Estructura de OU creada en AD para organización de usuarios, equipos y grupos.
+
+---
+
+## 5.2 Estructura de Active Directory
+
+### Unidades Organizativas (OU)
+
+
+TFG
+├── Usuarios
+├── Equipos
+├── Servidores
+├── Grupos
+└── Admins
+
+
+> Nota: Los contenedores y grupos por defecto del dominio (`Users`, `Domain Admins`, `Domain Users`, etc.) **no se movieron** ni modificaron para evitar errores en el dominio.
+
+### Grupos de seguridad
+
+Se aplicó el modelo **AGDLP** (Accounts → Global Groups → Domain Local → Permissions):
+
+- **Global Groups (GG_)** → Agrupan usuarios según función:
+  - `GG_Usuarios`
+  - `GG_Admins`  
+
+- **Domain Local Groups (DL_)** → Asignación de permisos a recursos:
+  - Ninguno implementado aún (solo se creó la estructura de grupos)
+
+> Todos los permisos se deben asignar a los **DL_**, los usuarios se agregan a los **GG_**, siguiendo buenas prácticas.
+
+---
+
+## 5.3 GPO básicas implementadas
+
+Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas de grupo:
+
+| GPO                          | OU aplicada    | Configuración principal |
+|-------------------------------|----------------|------------------------|
+| **GPO_Seguridad_Contraseñas** | Dominio        | Longitud mínima 8-12 caracteres, complejidad habilitada, historial y expiración opcional |
+| **GPO_Seguridad_Equipos**     | OU Equipos     | Firewall activado para Domain/Private/Public Profiles, bloqueo de conexiones entrantes no autorizadas |
+
+> Nota: Los perfiles del firewall se configuraron como **On (activados)**; no se agregaron reglas específicas de entrada o salida para simplificar el laboratorio.
+
+---
+
+## 5.4 Observaciones y buenas prácticas aplicadas
+
+- Se mantuvieron los grupos por defecto del dominio en el contenedor `Users` sin modificaciones.  
+- Se crearon OUs específicas para separar usuarios, equipos, servidores y grupos.  
+- Se siguió la convención de nombres profesional para grupos de seguridad (`GG_` y `DL_`).  
+- Se aplicó la política de firewall básica para proteger todos los equipos del dominio.  
+
+---
