@@ -96,6 +96,7 @@ New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound -Protocol
 
 Con esto, el servidor Windows queda preparado para exponer sus métricas del sistema de manera centralizada, lo que permitirá su monitorización en futuras fases del proyecto.
 
+---
 
 # 5. Implementación de Active Directory y configuración básica de seguridad
 
