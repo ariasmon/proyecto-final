@@ -103,7 +103,7 @@ Con esto, el servidor Windows queda preparado para exponer sus métricas del sis
 ## 5.1 Estado actual
 
 - Servidor con **Active Directory Domain Services (AD DS)** instalado y promocionado como **Controlador de Dominio**.  
-- Dominio configurado: `tfg.vp.local`  
+- Dominio configurado: `tfg.vp`  
 - Nivel funcional de dominio y bosque: **Windows Server 2016**  
 - DNS y Global Catalog habilitados.  
 - Inicio de sesión posterior: `TFG\Administrator`.  
