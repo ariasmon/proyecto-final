@@ -1,177 +1,256 @@
 # TFG: Despliegue de Infraestructura de Red Segura Híbrida en AWS con Monitorización Centralizada
 
-### Proyecto de Víctor Alberjón Hidalgo y Pablo Arias Montilla
+**Autores:** Víctor Alberjón Hidalgo y Pablo Arias Montilla
+
+---
 
 ## 1. Planificación inicial
 
 En esta fase se establecen las bases del proyecto, definiendo el alcance, los recursos necesarios y las restricciones que guiarán el desarrollo.
 
 ### 1.1. Objetivo
-El objetivo principal es diseñar e implantar una infraestructura de red segura en la nube pública (AWS), utilizando una arquitectura de **Gateway Linux** (Ubuntu) para proteger y enrutar el tráfico de una subred privada donde reside un **Controlador de Dominio Windows**. Adicionalmente, se busca implementar un sistema de observabilidad que centralice la monitorización de tráfico y recursos de ambos servidores, integrando mecanismos de alerta temprana ante fallos críticos.
+
+El objetivo principal es diseñar e implantar una infraestructura de red segura en la nube pública (AWS), utilizando una arquitectura de Gateway Linux (Ubuntu) para proteger y enrutar el tráfico de una subred privada donde reside un servidor Windows. Adicionalmente, se busca implementar un sistema de observabilidad que centralice la monitorización de tráfico y recursos de ambos servidores, integrando mecanismos de alerta temprana ante fallos críticos, todo ello bajo un paradigma de **automatización y GitOps**.
 
 ### 1.2. Alcance del proyecto
+
 El proyecto contempla la ejecución de las siguientes tareas clave:
 
+* **Infraestructura como Código (IaC):** Automatización total del despliegue mediante AWS CloudFormation (GitOps).
 * **Despliegue de Red (VPC):** Configuración de una nube privada virtual segmentada en subredes pública (DMZ) y privada (Intranet).
-* **Servidor de Borde (Ubuntu Server):**
-    * Configuración como **NAT Instance** para enrutamiento de paquetes.
-    * Implementación de seguridad perimetral mediante Firewall (UFW/iptables).
-    * Despliegue de stack de monitorización (Prometheus + Grafana).
-    * **Configuración de Alertmanager:** Integración de notificaciones automáticas a plataformas externas (Telegram/Discord) ante incidentes críticos.
-* **Servidor Interno (Windows Server):**
-    * Promoción a Controlador de Dominio (Active Directory DS).
-    * Aislamiento de red (sin IP pública directa).
-* **Gestión y Acceso:**
-    * Configuración de acceso remoto para administración mediante protocolos estándar (SSH para Linux y RDP para Windows).
-    * Configuración de reglas de reenvío (Port Forwarding) o Bastion en el Gateway para permitir el acceso RDP al servidor interno.
-* **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway y visualización de métricas en tiempo real.
+* **Servidor de Borde (Ubuntu Server):** Configuración como NAT Instance, seguridad perimetral (iptables) y despliegue de stack de monitorización (Prometheus + Grafana).
+* **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos (Active Directory).
+* **Active Directory:** Despliegue de dominio Windows para gestión centralizada de identidades.
+* **VPN (WireGuard):** Configuración de túnel VPN para acceso remoto seguro de usuarios al dominio.
+* **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía Port Forwarding en el Gateway).
+* **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway.
 
 ### 1.3. Recursos identificados
-Para llevar a cabo el proyecto se han identificado los siguientes recursos:
 
-* **Infraestructura (AWS EC2):**
-    * 1x Instancia `t2.micro` (Ubuntu Server 22.04 LTS).
-    * 1x Instancia `t2.micro` o `t3.micro` (**Windows Server 2022**).
+* **Infraestructura (AWS EC2 & CloudFormation):**
+    * 1x Instancia **t3.micro** (Ubuntu Server 22.04 LTS) + **IP Elástica**.
+    * 1x Instancia **t3.small** (Windows Server 2022). *Nota: Se aumentó de micro a small para garantizar la estabilidad del sistema.*
 * **Software y Servicios:**
-    * **Sistemas Operativos:** Linux y Windows Server.
-    * **Red:** IPTables, UFW, VPC Routing.
-    * **Monitorización y Alertas:** Prometheus, Grafana, Alertmanager, Node Exporter, Windows Exporter.
-* **Personal:** 1 Técnico Administrador de Sistemas.
+    * Red y Automatización: IPTables, VPC Routing, YAML (CloudFormation).
+    * Monitorización: Prometheus, Grafana, Alertmanager, Node Exporter, Windows Exporter.
+    * VPN: WireGuard para acceso remoto seguro.
 
 ### 1.4. Restricciones y condicionantes
-El proyecto debe adherirse a las siguientes limitaciones:
 
-* **Económicas:** El proyecto debe ser viable dentro de la capa gratuita (*Free Tier*) de AWS.
-* **Seguridad y Acceso:** La administración remota se realizará a través de los puertos estándar (22 y 3389). Se deben aplicar reglas de seguridad (Security Groups) para restringir el acceso a IPs autorizadas siempre que sea posible.
-* **Plazos:** El despliegue funcional debe estar listo antes de la fecha de defensa del TFG.
+* **Económicas:** Viabilidad dentro de la capa gratuita (Free Tier) de AWS siempre que sea posible.
+* **Seguridad:** Administración a través de puertos estándar (22 y 3389) protegidos por Security Groups.
+* **Plazos:** Despliegue funcional antes de la fecha de defensa del TFG.
 
-### 1.5. Documentos generados
-* Documento de alcance del proyecto.
-* Cronograma preliminar de fases.
+### 1.5. Cronograma preliminar
 
-### 1.6. Cronograma preliminar
-Para garantizar el cumplimiento de los objetivos en el plazo establecido, se ha diseñado una planificación temporal dividida en semanas de trabajo. La estimación total del proyecto es de **12 semanas**, cubriendo desde la investigación inicial hasta la defensa del TFG.
-
-| Fase | Tarea Principal | Semanas Estimadas | Descripción |
-| :--- | :--- | :---: | :--- |
-| **Fase 1** | Planificación y Análisis | 1 - 2 | Definición de alcance, requisitos y estudio de viabilidad en AWS Free Tier. |
-| **Fase 2** | Diseño de la Solución | 3 - 4 | Elaboración de diagramas de red (VPC), diseño de direccionamiento IP y políticas de seguridad (Security Groups). |
-| **Fase 3** | Despliegue de Infraestructura | 5 - 6 | Creación de VPC, subredes, tablas de enrutamiento y lanzamiento de instancias EC2 (Ubuntu y Windows). |
-| **Fase 4** | Configuración de Servicios | 7 - 8 | Configuración de NAT, Active Directory, Prometheus, Grafana y **Alertmanager**. |
-| **Fase 5** | Configuración de Accesos | 9 | Habilitación y securización de servicios SSH y RDP (reglas de firewall y reenvío de puertos). |
-| **Fase 6** | Pruebas y Validación | 10 | Ejecución del plan de pruebas (conectividad, estrés y simulacros de alertas). |
-| **Fase 7** | Documentación y Cierre | 11 - 12 | Redacción final de la memoria, manuales de administración y preparación de la defensa. |
+| Fase | Tarea Principal | Semanas | Descripción |
+| :--- | :--- | :--- | :--- |
+| Fase 1 | Planificación | 1 - 2 | Definición de alcance y estudio de viabilidad. |
+| Fase 2 | Diseño | 3 - 4 | Diagramas de red VPC y políticas de seguridad. |
+| Fase 3 | Despliegue Infra | 5 - 6 | Creación de VPC, subredes y automatización IaC. |
+| Fase 4 | Configuración | 7 - 8 | Configuración de NAT, Firewall y Monitorización. |
+| Fase 5 | Accesos | 9 | Habilitación de SSH y RDP mediante Port Forwarding. |
+| Fase 6 | Validación | 10 | Pruebas de conectividad y estrés. |
+| Fase 7 | Documentación | 11 - 12 | Redacción final de la memoria y defensa. |
 
 ---
 
 ## 2. Análisis de requisitos
 
-Esta fase detalla las especificaciones técnicas y funcionales que el sistema final debe cumplir para garantizar el éxito del despliegue.
-
 ### 2.1. Requisitos Funcionales (RF)
-* **RF-01 (Enrutamiento NAT):** El servidor Ubuntu debe actuar como puerta de enlace, realizando enmascaramiento de IP (*Masquerading*) para dotar de conectividad a la subred privada.
-* **RF-02 (Gestión de Identidad):** Windows Server debe proporcionar servicios de autenticación y autorización mediante Active Directory.
-* **RF-03 (Seguridad de Red):** El sistema debe gestionar el tráfico mediante firewall, permitiendo explícitamente el tráfico de administración y servicios autorizados.
-* **RF-04 (Monitorización de Tráfico):** Se deben capturar y visualizar métricas de ancho de banda (entrada/salida) en la interfaz del servidor Gateway para auditar el consumo total.
-* **RF-05 (Dashboard Unificado):** Grafana debe mostrar el estado de recursos (CPU, RAM, Disco) de ambos servidores en un único panel centralizado.
-* **RF-06 (Resolución DNS):** La red interna debe resolver correctamente nombres de dominio locales y externos a través del Controlador de Dominio.
-* **RF-07 (Gestión de Alertas):** El sistema debe detectar anomalías críticas y enviar notificaciones en tiempo real a un canal externo (Telegram/Discord). Las alertas deben incluir, como mínimo: caída del servicio Active Directory (NTDS) y agotamiento de créditos de CPU (*CPU Credit Balance*) en las instancias T2/T3.
-* **RF-08 (Acceso Remoto):** Se debe garantizar el acceso administrativo remoto a los servidores mediante SSH (puerto 22) para Linux y RDP (puerto 3389) para Windows, asegurando la conectividad necesaria para tareas de gestión.
+
+* **RF-01 (Enrutamiento NAT):** El servidor Ubuntu debe actuar como puerta de enlace para la subred privada.
+* **RF-02 (Despliegue Automatizado):** La infraestructura debe poder recrearse de forma idéntica sin intervención manual.
+* **RF-03 (Seguridad de Red):** Gestión del tráfico mediante firewall permitiendo solo administración autorizada.
+* **RF-04 (Monitorización de Tráfico):** Captura de métricas de ancho de banda en la interfaz del Gateway.
+* **RF-05 (Dashboard Unificado):** Grafana debe mostrar el estado de recursos de ambos servidores.
+* **RF-06 (Active Directory):** Implementar dominio Windows con AD para gestión centralizada de usuarios y recursos.
+* **RF-07 (Acceso VPN):** Configurar WireGuard para permitir acceso remoto seguro de usuarios al dominio corporativo.
+* **RF-08 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram/Discord) ante anomalías críticas.
+* **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP (3389).
 
 ### 2.2. Requisitos No Funcionales (RNF)
-* **RNF-01 (Aislamiento):** La instancia de Windows Server debe residir obligatoriamente en una subred privada sin dirección IP pública asignada directamente.
-* **RNF-02 (Rendimiento):** El proceso de recolección de métricas no debe impactar significativamente el rendimiento de la red ni superar el 10% de uso de CPU de la instancia.
-* **RNF-03 (Disponibilidad):** Los servicios de enrutamiento y monitorización deben iniciarse automáticamente tras el arranque del sistema (*systemd*).
-* **RNF-04 (Escalabilidad):** La arquitectura debe permitir la adición de futuros clientes en la subred privada sin necesidad de reconfigurar el enrutamiento del Gateway.
 
-### 2.3. Usuarios y Roles
-* **Administrador:** Acceso total (Root/Administrator) mediante SSH/RDP para configuración de infraestructura y servicios.
-* **Operador:** Acceso de lectura a los paneles de monitorización.
-* **Cliente de Dominio:** Usuario estándar con permisos restringidos y navegación filtrada por el Gateway.
-
-### 2.4. Análisis de sistemas actuales
-Se descarta el uso de *NAT Gateways* nativos de AWS por su elevado coste y falta de visibilidad interna del tráfico. La solución propuesta basada en una instancia Linux permite un control granular del tráfico y auditoría completa sin costes adicionales de licencia, aprovechando herramientas *Open Source*.
-
-Respecto a la administración, se opta por el uso de protocolos estándar (SSH y RDP) configurados sobre la infraestructura de red propia, permitiendo una gestión directa y compatible con las herramientas de administración habituales en entornos de sistemas.
-
-### 2.5. Documentos generados
-* Documento de Análisis de Requisitos (Funcionales y No Funcionales).
+* **RNF-01 (Aislamiento):** La instancia Windows debe residir en una subred privada sin IP pública directa.
+* **RNF-02 (Inmutabilidad):** Aplicación de principios GitOps para garantizar la consistencia del entorno.
+* **RNF-03 (Disponibilidad):** Los servicios de enrutamiento deben iniciarse automáticamente (systemd).
+* **RNF-04 (Seguridad VPN):** Las conexiones VPN deben utilizar cifrado fuerte. WireGuard emplea criptografía moderna (ChaCha20, Curve25519).
+* **RNF-05 (Rendimiento):** El Gateway debe mantener latencias de enrutamiento aceptables sin afectar significativamente el rendimiento de la red.
+* **RNF-06 (Documentación):** Toda configuración debe estar documentada y versionada para garantizar replicabilidad del entorno.
 
 ---
 
 ## 3. Diseño de la solución
 
-En esta fase se define la arquitectura técnica detallada que dará soporte a los requisitos planteados, estableciendo la topología de red, la selección de tecnologías y las políticas de seguridad.
-
 ### 3.1. Arquitectura de Red y Topología (AWS VPC)
-La infraestructura se desplegará sobre una única **VPC (Virtual Private Cloud)** en AWS, segmentada para garantizar el aislamiento del servidor de dominio.
 
-* **Espacio de Direcciones (CIDR):** `10.0.0.0/16`
-* **Subred Pública (DMZ):**
-    * **CIDR:** `10.0.1.0/24`
-    * **Recurso:** Servidor Ubuntu (Gateway).
-    * **Enrutamiento:** Conectada a un Internet Gateway (IGW) para tráfico directo de entrada/salida.
-* **Subred Privada (Intranet):**
-    * **CIDR:** `10.0.2.0/24`
-    * **Recurso:** Windows Server 2022 (Controlador de Dominio).
-    * **Enrutamiento:** Sin acceso directo a Internet. Su tabla de rutas apuntará a la interfaz de red (ENI) de la instancia Ubuntu para todo el tráfico `0.0.0.0/0` (NAT).
+* **VPC CIDR:** `10.0.0.0/16`
+* **Subred Pública (DMZ):** `10.0.1.0/24`. Aloja el Gateway Ubuntu con IP Elástica.
+* **Subred Privada (Intranet):** `10.0.2.0/24`. Aloja el Windows Server. Su tráfico `0.0.0.0/0` apunta a la interfaz de red del Ubuntu.
 
-### 3.2. Selección de Tecnologías y Componentes
-Se han seleccionado las siguientes tecnologías para cubrir los requisitos funcionales:
+### 3.2. Diseño de Seguridad y Accesos
 
-* **Servidor de Borde (Gateway):**
-    * **SO:** Ubuntu Server 22.04 LTS.
-    * **NAT:** Configuración mediante `iptables` (IP Masquerade) y *IP Forwarding* a nivel de kernel.
-    * **Monitorización:** Prometheus (TSDB), Alertmanager (gestión de alertas) y Grafana (visualización).
-* **Servidor Interno:**
-    * **SO:** Windows Server 2022 Base.
-    * **Roles:** Active Directory Domain Services (AD DS) y DNS.
-* **Agentes de Métricas:**
-    * *Node Exporter* (para métricas de Linux).
-    * *Windows Exporter* (para métricas de Windows Server).
+1. **SG-Gateway (Ubuntu):** Inbound: 22 (SSH), 3389 (RDP Forward), 3000 (Grafana). Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: 3389 (RDP) e ICMP (Ping) solo desde el SG-Gateway. Outbound: Todo permitido hacia el Gateway.
 
-### 3.3. Diseño de Seguridad y Accesos
-La seguridad se implementará en dos capas: **Security Groups** (firewall de red de AWS) y configuración del sistema operativo.
+---
 
-#### A. Estrategia de Security Groups (AWS)
-Definición de reglas de tráfico permitidas:
+## 4. Implantación y configuración
 
-**1. SG-Gateway (Instancia Ubuntu):**
-* **Inbound (Entrada):**
-    * `TCP/22` (SSH): Permitido desde `0.0.0.0/0` (Recomendado restringir a IP de administración).
-    * `TCP/3389` (RDP Forwarded): Permitido para redirigir tráfico al Windows Server.
-    * `TCP/3000` (Grafana): Acceso al dashboard de monitorización.
-    * `Tráfico Interno`: Todo el tráfico procedente de la subred privada (`10.0.2.0/24`) para permitir la salida a Internet (NAT).
-* **Outbound (Salida):** Todo permitido.
+### 4.1. Despliegue de Infraestructura Base en AWS
 
-**2. SG-Internal (Windows Server):**
-* **Inbound (Entrada):**
-    * `TCP/3389` (RDP): Permitido **exclusivamente** desde el Grupo de Seguridad del Gateway (SG-Gateway).
-    * `TCP/UDP 53, 88, 135, 389, 445, 464, 636` (Active Directory): Tráfico interno permitido desde la subred pública.
-    * `TCP/9182` (Métricas): Puerto del *Windows Exporter* permitido solo desde la IP privada del Gateway (Prometheus).
-* **Outbound (Salida):** Todo permitido (el tráfico saldrá efectivamente a través del Gateway).
+1. **IP Elástica:** Asociada al Ubuntu para mantener un punto de acceso administrativo fijo.
+2. **IP Estática Windows:** Configurada como `10.0.2.75` para evitar desincronización de servicios internos.
+3. **Source/Destination Check:** Desactivado en la instancia Ubuntu para permitir el funcionamiento del NAT.
 
-#### B. Acceso Remoto y Port Forwarding
-Dado que el Windows Server se encuentra en una red privada aislada, se implementará una regla de **DNAT (Destination NAT)** en el servidor Ubuntu.
-* El administrador conectará por RDP a la IP Pública del Ubuntu (`IP_Ubuntu:3389`).
-* `iptables` redirigirá esa petición a la IP Privada del Windows (`IP_Windows:3389`), garantizando la administración sin exponer el servidor interno directamente.
+### 4.2. Configuración del Enrutamiento y NAT en Linux
 
-### 3.4. Diseño del Sistema de Monitorización y Alertas
-El flujo de datos para la observabilidad seguirá el siguiente esquema:
+```bash
+# Habilitar IP Forwarding
+sudo sysctl -w net.ipv4.ip_forward=1
 
-1.  **Recolección:** *Prometheus* (en Ubuntu) realizará peticiones periódicas (*scraping*) al `localhost:9100` (Node Exporter) y a la `IP_Privada_Windows:9182` (Windows Exporter).
-2.  **Visualización:** *Grafana* leerá la base de datos de Prometheus para pintar los paneles de control.
-3.  **Alertado:**
-    * Se definirán reglas en Prometheus.
-    * Cuando se active una regla, Prometheus enviará la señal a *Alertmanager*.
-    * *Alertmanager* gestionará la notificación y la enviará al canal configurado (Webhook de Discord o Bot de Telegram).
+# Configuración de NAT (Masquerade)
+sudo iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
 
-### 3.5. Documentos generados
-* Documento de Diseño de la Solución (Diagramas de red y esquemas de direccionamiento).
-* Especificación de reglas de Firewall y Security Groups.
+# Reenvío de puerto RDP (DNAT)
+sudo iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
 
-### 3.6. Esquema de la Solución
-A continuación se presenta el diagrama topológico de la infraestructura...
+# Persistencia de reglas
+sudo apt update && sudo apt install iptables-persistent -y
+sudo netfilter-persistent save
+```
 
-![Diagrama de Topología de Red](imagenes/topologia.png)
-*Figura 1: Topología de red en AWS con segmentación de subredes.*
+### 4.3. Configuración del Servidor Interno (Windows Server)
+
+Para garantizar la estabilidad operativa y la conectividad a través del Gateway, se han realizado las siguientes configuraciones críticas:
+
+1. **Optimización de Instancia:** Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM).
+2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `127.0.0.1` y `8.8.8.8`.
+3. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell:
+
+```powershell
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+```
+
+### 4.4. Implementación del Controlador de Dominio (Active Directory)
+
+Tras completar la configuración de la infraestructura de red y verificar la conectividad entre las instancias de la VPC, se procedió a la configuración del servidor interno basado en **Windows Server 2022** como controlador de dominio mediante la instalación del rol **Active Directory Domain Services**. El objetivo de esta fase fue establecer un sistema centralizado de autenticación y gestión de identidades para la red privada del proyecto.
+
+#### Instalación del rol Active Directory
+
+La instalación del servicio se realizó a través del **Server Manager**, utilizando el asistente de instalación de roles y características. Se seleccionó el rol **Active Directory Domain Services (AD DS)**, incluyendo automáticamente las dependencias necesarias, entre ellas el servicio **DNS**, fundamental para localizar los distintos servicios del dominio dentro de la red interna.
+
+Una vez completada la instalación del rol, el sistema solicitó **promover el servidor a controlador de dominio**.
+
+#### Promoción del servidor a controlador de dominio
+
+El servidor fue configurado como el **primer controlador de dominio** dentro de un nuevo bosque (*Forest*). Se definieron los siguientes parámetros:
+
+| Parámetro | Valor |
+|-----------|-------|
+| Dominio del proyecto | `tfg.vp` |
+| Nombre NetBIOS | `TFG` |
+
+Durante el proceso de configuración se habilitaron:
+- Servidor **DNS integrado**
+- **Catálogo global (Global Catalog)**
+- Base de datos del directorio de **Active Directory**
+
+Asimismo, se estableció una **contraseña de recuperación para el modo Directory Services Restore Mode (DSRM)**, utilizada para tareas de mantenimiento o recuperación del servicio en caso de fallo crítico.
+
+Tras la validación de requisitos, el sistema instaló los componentes necesarios y **reinició automáticamente el servidor** para finalizar el proceso.
+
+#### Configuración del servicio DNS
+
+Durante la promoción del servidor a controlador de dominio se instaló automáticamente el servicio **DNS integrado**. Este servicio es esencial para el funcionamiento de Active Directory, ya que permite a los equipos de la red localizar:
+- Controladores de dominio
+- Servidores LDAP
+- Otros recursos del directorio
+
+Durante la instalación se mostró una advertencia relacionada con la **imposibilidad de crear una delegación DNS**. Este mensaje es habitual cuando se crea un dominio completamente nuevo dentro de una red privada sin una zona DNS superior existente, por lo que **no afecta al funcionamiento del entorno desplegado**.
+
+#### Verificación del servicio
+
+Una vez completada la instalación, se verificó el correcto funcionamiento del dominio mediante las herramientas administrativas incluidas, especialmente la consola **Active Directory Users and Computers**. Se comprobó:
+- La creación correcta del dominio
+- La disponibilidad del controlador de dominio
+- El funcionamiento del servicio de autenticación
+- La correcta resolución de nombres mediante **DNS** dentro de la red privada
+
+Finalmente, se confirmó que el servidor Windows mantiene conectividad hacia Internet a través del servidor Ubuntu configurado como gateway NAT, validando la integración entre la infraestructura de red y los servicios de directorio implementados.
+
+### 4.5. Implementación de Windows Exporter para Monitorización
+
+Con el objetivo de permitir la monitorización del servidor Windows dentro de la infraestructura del proyecto, se implementó **Windows Exporter**, una herramienta que expone métricas del sistema operativo Windows en un formato compatible con sistemas de monitorización como Prometheus.
+
+Windows Exporter recopila información del sistema como el uso de CPU, memoria, disco y red, y la expone a través de un endpoint HTTP interno que puede ser consultado desde la red privada.
+
+#### Instalación de Windows Exporter
+
+La instalación se realizó en el servidor **Windows Server 2022** mediante el paquete instalador en formato `.msi`. Durante el proceso se configuraron los *collectors*, responsables de recopilar diferentes métricas del sistema.
+
+**Módulos habilitados:**
+
+| Módulo | Descripción |
+|--------|-------------|
+| `cpu` | Uso del procesador |
+| `memory` | Consumo de memoria RAM |
+| `logical_disk` | Espacio disponible y uso de discos |
+| `net` | Estadísticas de tráfico de red |
+| `os` | Información general del sistema operativo |
+| `system` | Estado general del sistema y tiempo de actividad |
+
+Una vez completada la instalación, Windows Exporter se ejecuta automáticamente como un servicio de Windows llamado **windows_exporter**.
+
+#### Exposición de métricas
+
+Windows Exporter expone las métricas a través de un servidor HTTP que escucha en el puerto **9182**. Para verificar el correcto funcionamiento del servicio, se accedió desde el propio servidor a:
+
+```
+http://localhost:9182/metrics
+```
+
+Al abrir esta dirección se muestran múltiples métricas del sistema en formato de texto estructurado. Ejemplos de métricas visibles:
+
+```
+windows_cpu_time_total
+windows_memory_available_bytes
+windows_logical_disk_free_bytes
+windows_os_info
+windows_system_system_up_time
+```
+
+#### Configuración del firewall
+
+Para permitir que otros equipos dentro de la red privada puedan acceder a las métricas, se creó una regla en el firewall de Windows que permite conexiones entrantes al puerto 9182:
+
+```powershell
+New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+```
+
+Con esto, el servidor Windows queda preparado para exponer sus métricas del sistema de manera centralizada, lo que permite su monitorización desde Prometheus en el servidor Gateway.
+
+### 4.6. Automatización y Enfoque GitOps (Infraestructura como Código)
+
+Para garantizar la inmutabilidad y replicabilidad del entorno, se ha adoptado una metodología GitOps utilizando **AWS CloudFormation**.
+
+Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tablas de Rutas, Security Groups e Instancias EC2) está definida de forma declarativa en un único archivo YAML (`despliegue-tfg.yaml`).
+
+Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`. Esto permite que, en el momento de crear la pila en AWS, las instancias ejecuten automáticamente sus configuraciones internas:
+
+* El **Ubuntu Gateway** ejecuta un script bash en el arranque que habilita el reenvío de paquetes IP (`ip_forward`) y establece las reglas de iptables (NAT y Port Forwarding) haciéndolas persistentes.
+* El **Windows Server** ejecuta un script de PowerShell en el arranque que localiza la interfaz de red activa, le asigna la IP estática requerida para el Active Directory, configura los servidores DNS y desactiva los perfiles del cortafuegos.
+
+Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio.
+
+---
+
+## 5. Trabajo pendiente
+
+### 5.1. Configuración de VPN con WireGuard
+
+- Instalar WireGuard en el Gateway Ubuntu.
+- Generar claves y configurar interfaz VPN.
+- Configurar clientes para acceso remoto.
+- Integrar reglas de firewall para tráfico VPN.
+- Documentar proceso de conexión para usuarios finales.

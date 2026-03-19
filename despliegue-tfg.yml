@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infraestructura TFG: VPC, Subredes, Security Groups, Instancias y Enrutamiento'
+
+Parameters:
+  KeyName:
+    Description: Par de claves (.pem) para acceder a las instancias
+    Type: AWS::EC2::KeyPair::KeyName
+  LatestUbuntuAMI:
+    Description: Ubuntu 22.04 LTS (auto)
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+  LatestWindowsAMI:
+    Description: Windows Server 2022 (auto)
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base'
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC-TFG
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  SubnetPublica:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Subred-Publica-DMZ
+
+  SubnetPrivada:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: Subred-Privada-Intranet
+
+  SGGateway:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Gateway Ubuntu - SSH, RDP, Grafana y trafico interno
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: -1
+          CidrIp: 10.0.2.0/24
+
+  SGInternal:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Windows Server - Solo acceso desde Gateway
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          SourceSecurityGroupId: !Ref SGGateway
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          SourceSecurityGroupId: !Ref SGGateway
+
+  UbuntuGateway:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref LatestUbuntuAMI
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          SubnetId: !Ref SubnetPublica
+          GroupSet: [!Ref SGGateway]
+      SourceDestCheck: false
+      Tags:
+        - Key: Name
+          Value: Ubuntu-Gateway-TFG
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sysctl -w net.ipv4.ip_forward=1
+          echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+          iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
+          iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -y
+          apt-get install -y iptables-persistent netfilter-persistent
+          netfilter-persistent save
+
+  WindowsInternal:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      ImageId: !Ref LatestWindowsAMI
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          SubnetId: !Ref SubnetPrivada
+          GroupSet: [!Ref SGInternal]
+          PrivateIpAddress: 10.0.2.75
+      Tags:
+        - Key: Name
+          Value: Windows-AD-TFG
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+          $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
+          New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
+          Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1","8.8.8.8")
+          </powershell>
+
+  ElasticIPGateway:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref UbuntuGateway
+
+  RouteTablePublica:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: RT-Publica
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTablePublica
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  AsociacionPublica:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPublica
+      RouteTableId: !Ref RouteTablePublica
+
+  RouteTablePrivada:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: RT-Privada
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTablePrivada
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref UbuntuGateway
+
+  AsociacionPrivada:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetPrivada
+      RouteTableId: !Ref RouteTablePrivada
+
+Outputs:
+  IPElasticaUbuntu:
+    Description: IP publica del Gateway (SSH/RDP)
+    Value: !Ref ElasticIPGateway
