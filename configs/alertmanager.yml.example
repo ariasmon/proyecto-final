@@ -1,0 +1,27 @@
+# Configuración de Alertmanager para el TFG
+# Colocar en: /etc/prometheus/alertmanager.yml
+# NOTA: Reemplazar TU_BOT_TOKEN y TU_CHAT_ID con valores reales
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+  receiver: telegram-notifications
+
+receivers:
+  - name: telegram-notifications
+    telegram_configs:
+      - bot_token: 'TU_BOT_TOKEN_AQUI'
+        chat_id: TU_CHAT_ID_AQUI
+        parse_mode: HTML
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['alertname', 'instance']

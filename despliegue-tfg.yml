@@ -58,7 +58,7 @@ Resources:
   SGGateway:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Gateway Ubuntu - SSH, RDP, Grafana y trafico interno
+      GroupDescription: Gateway Ubuntu - SSH, RDP, Grafana, WireGuard, Prometheus y trafico interno
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -73,8 +73,22 @@ Resources:
           FromPort: 3000
           ToPort: 3000
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 9093
+          ToPort: 9093
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: udp
+          FromPort: 51820
+          ToPort: 51820
+          CidrIp: 0.0.0.0/0
         - IpProtocol: -1
           CidrIp: 10.0.2.0/24
+        - IpProtocol: -1
+          CidrIp: 10.0.3.0/24
 
   SGInternal:
     Type: AWS::EC2::SecurityGroup
@@ -85,6 +99,10 @@ Resources:
         - IpProtocol: tcp
           FromPort: 3389
           ToPort: 3389
+          SourceSecurityGroupId: !Ref SGGateway
+        - IpProtocol: tcp
+          FromPort: 9182
+          ToPort: 9182
           SourceSecurityGroupId: !Ref SGGateway
         - IpProtocol: icmp
           FromPort: -1
@@ -191,5 +209,11 @@ Resources:
 
 Outputs:
   IPElasticaUbuntu:
-    Description: IP publica del Gateway (SSH/RDP)
+    Description: IP publica del Gateway (SSH/RDP/Grafana)
     Value: !Ref ElasticIPGateway
+  URIGrafana:
+    Description: URL de acceso a Grafana
+    Value: !Sub 'http://${ElasticIPGateway}:3000'
+  URIPrometheus:
+    Description: URL de acceso a Prometheus (solo desde VPC)
+    Value: !Sub 'http://${ElasticIPGateway}:9090'

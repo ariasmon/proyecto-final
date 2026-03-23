@@ -243,14 +243,473 @@ Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-T
 
 Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio.
 
+### 4.7. Implementación de VPN con WireGuard
+
+Para permitir el acceso remoto seguro de usuarios a la infraestructura desde fuera de AWS, se ha implementado una VPN basada en **WireGuard**. Esta solución permite que los usuarios se conecten a la red privada y accedan a los recursos del dominio Active Directory de forma segura.
+
+#### Arquitectura de la VPN
+
+| Componente | Descripción |
+|------------|-------------|
+| **Rango VPN** | `10.0.3.0/24` - Subred dedicada para clientes VPN |
+| **Puerto** | UDP 51820 - Puerto estándar de WireGuard |
+| **DNS** | `10.0.2.75` - Controlador de dominio Active Directory |
+| **Gateway** | Ubuntu Server actúa como servidor VPN y NAT |
+
+La configuración permite que los clientes VPN accedan a:
+- **Subred privada** (`10.0.2.0/24`): Windows Server, Active Directory y otros recursos internos
+- **Subred VPN** (`10.0.3.0/24`): Comunicación entre clientes conectados
+
+#### Instalación del servidor WireGuard
+
+La instalación se realiza en el **Ubuntu Gateway**. Los pasos ejecutados fueron:
+
+```bash
+# Instalar WireGuard
+sudo apt update && sudo apt install -y wireguard
+
+# Generar claves del servidor
+sudo wg genkey | sudo tee /etc/wireguard/privatekey | sudo wg pubkey | sudo tee /etc/wireguard/publickey
+sudo chmod 600 /etc/wireguard/privatekey
+```
+
+#### Configuración del servidor
+
+El archivo de configuración `/etc/wireguard/wg0.conf` define la interfaz VPN:
+
+```ini
+[Interface]
+Address = 10.0.3.1/24
+ListenPort = 51820
+PrivateKey = <clave_privada_servidor>
+
+# Peers (clientes) se añaden dinámicamente con el script de gestión
+```
+
+#### Reglas de firewall para VPN
+
+Se han añadido las siguientes reglas iptables para permitir el tráfico VPN y el enrutamiento hacia la subred privada:
+
+```bash
+# Habilitar IP Forwarding (si no estaba habilitado)
+sudo sysctl -w net.ipv4.ip_forward=1
+
+# NAT para tráfico VPN hacia Internet y subred privada
+sudo iptables -t nat -A POSTROUTING -s 10.0.3.0/24 -o ens5 -j MASQUERADE
+
+# Persistir reglas
+sudo netfilter-persistent save
+```
+
+Adicionalmente, el **Security Group de AWS** (`SG-Gateway`) debe permitir tráfico entrante en el puerto **UDP 51820** desde las IPs de origen autorizadas.
+
+#### Inicio del servicio WireGuard
+
+```bash
+# Habilitar e iniciar el servicio
+sudo systemctl enable wg-quick@wg0
+sudo systemctl start wg-quick@wg0
+
+# Verificar estado
+sudo wg show
+```
+
+#### Gestión de clientes VPN
+
+Se ha desarrollado un script de automatización (`scripts/crear-cliente-vpn.sh`) que facilita la creación de nuevos clientes VPN. Este script:
+
+1. **Genera claves** del cliente (pública y privada)
+2. **Asigna una IP automática** dentro del rango `10.0.3.2-254`
+3. **Registra el peer** en el servidor WireGuard
+4. **Crea el archivo de configuración** listo para importar
+5. **Configura el DNS** para apuntar al Active Directory
+
+**Uso del script:**
+
+```bash
+# En el servidor Ubuntu Gateway
+sudo ./crear-cliente-vpn.sh <nombre_cliente> [ip_elastica]
+
+# Ejemplo
+sudo ./crear-cliente-vpn.sh usuario1
+sudo ./crear-cliente-vpn.sh portatil_juan 54.123.45.67
+```
+
+El script genera un archivo `.conf` en `/etc/wireguard/clients/` que debe ser transferido al dispositivo cliente e importado en la aplicación WireGuard.
+
+#### Configuración de clientes
+
+**Archivo de configuración del cliente (ejemplo):**
+
+```ini
+[Interface]
+PrivateKey = <clave_privada_cliente>
+Address = 10.0.3.2/24
+DNS = 10.0.2.75
+
+[Peer]
+PublicKey = <clave_publica_servidor>
+Endpoint = <IP_ELASTICA_GATEWAY>:51820
+AllowedIPs = 10.0.2.0/24, 10.0.3.0/24
+PersistentKeepalive = 25
+```
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `Address` | IP asignada al cliente en la VPN |
+| `DNS` | Servidor DNS (Controlador de Dominio AD) |
+| `Endpoint` | IP pública del Gateway y puerto WireGuard |
+| `AllowedIPs` | Rutas que se envían a través de la VPN |
+| `PersistentKeepalive` | Mantiene la conexión activa (útil tras NAT) |
+
+#### Integración con Active Directory
+
+Una vez conectado a la VPN, el cliente puede unirse al dominio **tfg.vp**:
+
+1. **Verificar conectividad DNS:**
+   ```bash
+   nslookup tfg.vp 10.0.2.75
+   ```
+
+2. **Unirse al dominio (Windows):**
+   - Configuración → Sistema → Acerca de → Unirse a un dominio
+   - Introducir dominio: `tfg.vp`
+   - Proporcionar credenciales de administrador del dominio
+
+3. **Unirse al dominio (Linux):**
+   ```bash
+   sudo realm join tfg.vp -U administrador
+   ```
+
+#### Verificación de la conexión VPN
+
+Para verificar clientes conectados desde el servidor:
+
+```bash
+# Ver peers activos
+sudo wg show
+
+# Salida esperada:
+# interface: wg0
+#   public key: (clave_del_servidor)
+#   private key: (hidden)
+#   listening port: 51820
+#
+# peer: (clave_publica_cliente)
+#   endpoint: (IP_cliente):puerto
+#   allowed ips: 10.0.3.2/32
+```
+
+#### Consideraciones de seguridad
+
+- **Cifrado:** WireGuard utiliza criptografía moderna (ChaCha20, Curve25519, BLAKE2s)
+- **Autenticación:** Basada en claves públicas/privadas
+- **Punto único de entrada:** Todo el tráfico pasa por el Gateway Ubuntu
+- **DNS:** Resolución de nombres a través del Active Directory
+- **Acceso restringido:** Los clientes VPN solo pueden acceder a las subredes permitidas
+
+### 4.8. Implementación de Node Exporter para Monitorización de Ubuntu
+
+Para monitorizar el servidor Ubuntu Gateway, se ha instalado **Node Exporter**, una herramienta que expone métricas del sistema operativo Linux en un formato compatible con Prometheus.
+
+Node Exporter recopila información del sistema como el uso de CPU, memoria, disco y red, y la expone a través de un endpoint HTTP en el puerto 9100.
+
+#### Instalación de Node Exporter
+
+La instalación se realizó desde los repositorios de Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y prometheus-node-exporter
+sudo systemctl enable prometheus-node-exporter
+sudo systemctl start prometheus-node-exporter
+```
+
+#### Verificación del servicio
+
+Para verificar que Node Exporter está funcionando correctamente:
+
+```bash
+sudo systemctl status prometheus-node-exporter
+curl http://localhost:9100/metrics
+```
+
+El servicio expone métricas en formato de texto que pueden ser consultadas desde `http://localhost:9100/metrics`.
+
+#### Métricas disponibles
+
+| Métrica | Descripción |
+|---------|-------------|
+| `node_cpu_seconds_total` | Tiempo de CPU por modo |
+| `node_memory_MemAvailable_bytes` | Memoria disponible |
+| `node_memory_MemTotal_bytes` | Memoria total |
+| `node_filesystem_avail_bytes` | Espacio disponible en disco |
+| `node_filesystem_size_bytes` | Tamaño total del sistema de archivos |
+| `node_network_receive_bytes_total` | Bytes recibidos por red |
+| `node_network_transmit_bytes_total` | Bytes transmitidos por red |
+
+### 4.9. Implementación de Prometheus para Recolección de Métricas
+
+Prometheus es el sistema de monitorización centralizado que recopila métricas de todos los servidores de la infraestructura y las almacena en una base de datos temporal.
+
+#### Instalación de Prometheus
+
+La instalación se realizó desde los repositorios de Ubuntu:
+
+```bash
+sudo apt install -y prometheus
+sudo systemctl enable prometheus
+sudo systemctl start prometheus
+```
+
+#### Configuración de Targets
+
+El archivo de configuración `/etc/prometheus/prometheus.yml` define los objetivos de recolección:
+
+```yaml
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 5s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: node
+    static_configs:
+      - targets: ['localhost:9100']
+
+  - job_name: 'windows-server'
+    static_configs:
+      - targets: ['10.0.2.75:9182']
+```
+
+| Target | Descripción | Puerto |
+|--------|-------------|--------|
+| `prometheus` | Métricas de Prometheus | 9090 |
+| `node` | Métricas de Ubuntu Gateway | 9100 |
+| `windows-server` | Métricas de Windows Server | 9182 |
+
+#### Reglas de Alerta
+
+Se han configurado las siguientes reglas de alerta en `/etc/prometheus/alert_rules.yml`:
+
+| Regla | Descripción | Umbral |
+|-------|-------------|--------|
+| `InstanceDown` | Servidor caído | 1 minuto sin respuesta |
+| `HighCPU` | Uso de CPU elevado | >80% durante 5 minutos |
+| `HighMemory` | Uso de memoria elevado | >85% durante 5 minutos |
+| `DiskSpaceLow` | Espacio de disco bajo | >85% de uso durante 5 minutos |
+
+#### Verificación de Targets
+
+Para verificar que Prometheus está recolectando métricas correctamente:
+
+```bash
+curl http://localhost:9090/api/v1/targets | python3 -m json.tool
+```
+
+Cada target debe mostrar `"health": "up"` en su estado.
+
+### 4.10. Implementación de Grafana para Visualización
+
+Grafana proporciona una interfaz web para visualizar las métricas recolectadas por Prometheus mediante dashboards personalizables.
+
+#### Instalación de Grafana
+
+Se instaló desde el repositorio oficial de Grafana:
+
+```bash
+sudo apt install -y apt-transport-https software-properties-common wget
+wget -q -O /usr/share/keyrings/grafana.key https://apt.grafana.com/gpg.key
+echo "deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+sudo apt update
+sudo apt install -y grafana
+sudo systemctl enable grafana-server
+sudo systemctl start grafana-server
+```
+
+#### Acceso a Grafana
+
+| Parámetro | Valor |
+|-----------|-------|
+| **URL** | `http://<IP_ELASTICA_GATEWAY>:3000` |
+| **Usuario por defecto** | `admin` |
+| **Contraseña por defecto** | `admin` |
+
+Se recomienda cambiar la contraseña en el primer acceso.
+
+#### Configuración de Data Source
+
+Para conectar Grafana con Prometheus:
+
+1. Acceder a **Configuration** → **Data Sources**
+2. Añadir nuevo data source tipo **Prometheus**
+3. Configurar URL: `http://localhost:9090`
+4. Guardar y probar conexión
+
+#### Dashboard Recomendado
+
+Se recomienda importar el dashboard **Node Exporter Full** (ID: 1860) desde Grafana:
+
+1. **Dashboards** → **Import**
+2. Introducir ID: `1860`
+3. Seleccionar data source: Prometheus
+4. Importar
+
+Este dashboard proporciona una vista completa de las métricas del sistema Ubuntu.
+
+### 4.11. Implementación de Alertmanager para Notificaciones
+
+Alertmanager gestiona las alertas generadas por Prometheus y las envía a través de diferentes canales de notificación.
+
+#### Instalación de Alertmanager
+
+La versión inicial instalada desde repositorios era la 0.23.0, pero se actualizó a la versión 0.28.1 para soportar notificaciones de Telegram nativas:
+
+```bash
+# Descargar versión 0.28.1
+cd /tmp
+wget https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
+tar xvf alertmanager-0.28.1.linux-amd64.tar.gz
+
+# Detener servicio
+sudo systemctl stop prometheus-alertmanager
+
+# Reemplazar binario
+sudo cp /tmp/alertmanager-0.28.1.linux-amd64/alertmanager /usr/bin/prometheus-alertmanager
+
+# Crear directorio de datos
+sudo mkdir -p /var/lib/prometheus/alertmanager
+sudo chown -R prometheus:prometheus /var/lib/prometheus/alertmanager
+
+# Iniciar servicio
+sudo systemctl start prometheus-alertmanager
+```
+
+#### Configuración del servicio
+
+El archivo `/etc/default/prometheus-alertmanager` debe contener:
+
+```bash
+ARGS="--storage.path=/var/lib/prometheus/alertmanager --config.file=/etc/prometheus/alertmanager.yml"
+```
+
+#### Configuración de Telegram
+
+El archivo `/etc/prometheus/alertmanager.yml` configura las notificaciones:
+
+```yaml
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+  receiver: telegram-notifications
+
+receivers:
+  - name: telegram-notifications
+    telegram_configs:
+      - bot_token: 'TU_BOT_TOKEN'
+        chat_id: TU_CHAT_ID
+        parse_mode: HTML
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['alertname', 'instance']
+```
+
+#### Creación del Bot de Telegram
+
+Para configurar las notificaciones por Telegram:
+
+1. **Crear un bot:** Abrir [@BotFather](https://t.me/botfather) en Telegram y ejecutar `/newbot`
+2. **Obtener el token:** Guardar el token proporcionado (ej: `1234567890:ABCdef...`)
+3. **Crear un grupo:** Crear un grupo de Telegram para recibir alertas
+4. **Añadir el bot:** Añadir el bot al grupo como administrador
+5. **Obtener el Chat ID:** Acceder a `https://api.telegram.org/bot<TOKEN>/getUpdates` y buscar el campo `chat.id`
+6. **Configurar en Alertmanager:** Añadir el token y Chat ID en `/etc/prometheus/alertmanager.yml`
+
+#### Prueba de Alertas
+
+Para enviar una alerta de prueba:
+
+```bash
+amtool alert add prueba severity=critical --annotation=summary="Alerta de prueba" --annotation=description="Prueba desde TFG" --alertmanager.url=http://localhost:9093
+```
+
+La alerta debe llegar al grupo de Telegram configurado.
+
+#### Ejemplo de alerta recibida
+
+A continuación se muestra un ejemplo real de una alerta recibida en Telegram cuando el servidor Windows deja de responder:
+
+![Alerta de Windows Server caído](imagenes/Alerta-WindowsServer-Caido.png)
+
+*Ejemplo de alerta `InstanceDown` recibida en Telegram indicando que el servidor Windows (10.0.2.75:9182) está caído.*
+
+#### Verificación del Estado
+
+Para verificar que Alertmanager está funcionando:
+
+```bash
+sudo systemctl status prometheus-alertmanager
+curl http://localhost:9093/api/v2/status | python3 -m json.tool
+```
+
+#### Estado de las Notificaciones
+
+| Canal | Estado | Notas |
+|-------|--------|-------|
+| Telegram | ✓ Funcional | Configurado con bot token y Chat ID |
+| Discord | ⏳ Pendiente | Requiere servicio intermedio para formato JSON |
+
+#### Archivos de Configuración
+
+Los archivos de configuración de ejemplo están disponibles en el directorio `configs/` del repositorio:
+
+| Archivo | Descripción |
+|---------|-------------|
+| `configs/prometheus.yml.example` | Configuración de Prometheus |
+| `configs/alert_rules.yml` | Reglas de alerta |
+| `configs/alertmanager.yml.example` | Configuración de Alertmanager |
+| `configs/prometheus-alertmanager.defaults` | Variables de entorno de Alertmanager |
+
 ---
 
 ## 5. Trabajo pendiente
 
-### 5.1. Configuración de VPN con WireGuard
+### 5.1. Configuración de notificaciones con Discord
 
-- Instalar WireGuard en el Gateway Ubuntu.
-- Generar claves y configurar interfaz VPN.
-- Configurar clientes para acceso remoto.
-- Integrar reglas de firewall para tráfico VPN.
-- Documentar proceso de conexión para usuarios finales.
+Discord requiere un servicio intermedio que transforme el formato de alertas de Alertmanager al formato JSON esperado por Discord (`{"content": "mensaje"}`). Se deja pendiente para futuras implementaciones.
+
+Posibles soluciones:
+- Crear un servicio web intermedio que reciba webhooks de Alertmanager y los transforme
+- Utilizar servicios como [Prometheus Discord Webhook](https://github.com/benjojo/alertmanager-discord)
+
+### 5.2. Instalación de Windows Exporter
+
+El Windows Exporter debe instalarse en el servidor Windows (10.0.2.75) para completar la monitorización. La instalación se documenta en la sección 4.5.
+
+Pasos pendientes:
+1. Descargar Windows Exporter desde GitHub
+2. Instalar con los módulos necesarios: `cpu`, `memory`, `logical_disk`, `net`, `os`, `system`
+3. Verificar métricas en `http://10.0.2.75:9182/metrics`
+4. Importar dashboard de Windows Server en Grafana
+
+### 5.3. Dashboard de Grafana para Windows Server
+
+Una vez instalado Windows Exporter, se recomienda importar el dashboard de Windows Server en Grafana. Dashboard recomendado: Windows Node Exporter (ID: 12496).
+
+### 5.4. Pruebas y Validación
+
+Pendientes de realizar:
+- Pruebas de conectividad VPN desde clientes externos
+- Pruebas de unión al dominio Active Directory desde clientes VPN
+- Pruebas de carga en la infraestructura
+- Pruebas de failover de servicios
