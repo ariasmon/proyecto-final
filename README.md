@@ -164,3 +164,42 @@ Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas
 ---
 
 
+
+# Instalación de Windows Exporter en Windows Server
+
+
+##  Descargar Windows Exporter
+
+Abrir **PowerShell como Administrador** y ejecutar:
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi" -OutFile "C:\windows_exporter.msi"
+2. Instalación
+
+Ejecutar la instalación en modo silencioso con los colectores básicos habilitados:
+
+msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS=cpu,memory,logical_disk,net,os,system /qn
+3. Verificación del servicio
+
+Comprobar que el servicio se encuentra en ejecución:
+
+Get-Service windows_exporter
+
+Resultado esperado:
+
+Status   Name               DisplayName
+------   ----               -----------
+Running  windows_exporter   windows_exporter
+4. Configuración del Firewall
+
+Permitir el acceso al puerto utilizado por Windows Exporter (por defecto, 9182):
+
+New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+5. Verificación de métricas
+
+Desde el navegador del servidor, acceder a:
+
+http://localhost:9182/metrics
+
+Si la instalación es correcta, se mostrará la salida de métricas en formato Prometheus.
+
