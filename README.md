@@ -166,9 +166,6 @@ Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas
 
 # Instalación de Windows Exporter en Windows Server
 
-Guía paso a paso para instalar y validar **Windows Exporter** para su uso con Prometheus.
-
----
 
 ## 1. Descargar Windows Exporter
 
