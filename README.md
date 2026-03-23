@@ -168,47 +168,50 @@ Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas
 
 
 ## 1. Descargar Windows Exporter
+ Descarga del Paquete
+Ejecute el siguiente comando para descargar la versión estable más reciente (v0.27.2) directamente desde el repositorio oficial de Prometheus Community.
 
-Abrir **PowerShell como Administrador** y ejecutar:
+PowerShell
+# Definir URL y ruta de destino
+$url = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
+$dest = "C:\windows_exporter.msi"
 
-```powershell
-Invoke-WebRequest `
-  -Uri "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi" `
-  -OutFile "C:\windows_exporter.msi"
-2. Instalación
+# Ejecutar descarga
+Invoke-WebRequest -Uri $url -OutFile $dest
+Paso 2: Instalación Silenciosa
+Se recomienda una instalación mediante msiexec para definir los colectores específicos desde el inicio. Esto evita el consumo innecesario de recursos por métricas que no se requieran.
 
-Ejecutar la instalación en modo silencioso con colectores básicos:
+PowerShell
+# Instalación con colectores optimizados
+msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
+Paso 3: Gestión y Verificación del Servicio
+Una vez finalizada la instalación, el instalador crea automáticamente un servicio de Windows. Verificamos su estado operativo:
 
-msiexec /i C:\windows_exporter.msi `
-  ENABLED_COLLECTORS=cpu,memory,logical_disk,net,os,system `
-  /qn
-3. Verificación del servicio
+PowerShell
+# Consultar estado del servicio
+Get-Service windows_exporter | Select-Object DisplayName, Status, StartType
+Nota: El estado debe figurar como Running. De lo contrario, puede iniciarlo manualmente con Start-Service windows_exporter.
 
-Comprobar que el servicio esté en ejecución:
+Paso 4: Configuración del Firewall
+Para que el servidor de Prometheus pueda extraer (scrape) los datos, es necesario permitir el tráfico entrante en el puerto TCP 9182.
 
-Get-Service windows_exporter
-Resultado esperado
-Status   Name               DisplayName
-------   ----               -----------
-Running  windows_exporter   windows_exporter
-4. Configuración del Firewall
+PowerShell
+# Crear regla de entrada en el Firewall de Windows
+New-NetFirewallRule -DisplayName "Prometheus Windows Exporter" `
+    -Direction Inbound `
+    -Protocol TCP `
+    -LocalPort 9182 `
+    -Action Allow `
+    -Description "Permite la recolección de métricas de Prometheus"
+Validación de Métricas
+Para confirmar que el agente está exponiendo los datos correctamente, realice una petición local al endpoint de métricas:
 
-Permitir tráfico entrante en el puerto 9182:
+Vía PowerShell:
 
-New-NetFirewallRule `
-  -DisplayName "windows_exporter" `
-  -Direction Inbound `
-  -Protocol TCP `
-  -LocalPort 9182 `
-  -Action Allow
-5. Verificación de métricas
+PowerShell
+Invoke-RestMethod -Uri "http://localhost:9182/metrics"
+Vía Navegador:
+Acceda a la URL: http://localhost:9182/metrics
 
-Desde el navegador del servidor, acceder a:
+Debería visualizar un listado de métricas con el prefijo windows_ (ej. windows_cpu_time_total).
 
-http://localhost:9182/metrics
-Resultado esperado
-
-Se debe mostrar salida en formato Prometheus, por ejemplo:
-
-# HELP windows_cpu_time_total ...
-# TYPE windows_cpu_time_total counter
