@@ -169,28 +169,33 @@ Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas
 
 
 
-## 1. Descarga del Instalador
-Ejecute el siguiente comando en una terminal de **PowerShell (Administrador)** para obtener el paquete MSI oficial desde el repositorio de *Prometheus Community*.
+1. Descarga del Instalador
+Ejecute estos comandos en PowerShell (Administrador) para descargar el paquete oficial .msi.
 
-```powershell
-$url = "[https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi](https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi)"
+PowerShell
+# Definir variables de ruta
+$url = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
 $output = "C:\windows_exporter.msi"
 
+# Iniciar descarga
 Invoke-WebRequest -Uri $url -OutFile $output
-2. Instalación del Servicio
-Se recomienda realizar una instalación silenciosa definiendo los colectores específicos para optimizar el rendimiento del servidor.
+2. Instalación Silenciosa
+Instale el servicio configurando los colectores esenciales para optimizar el uso de CPU y memoria.
 
 PowerShell
 msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
-Nota: El parámetro /qn ejecuta la instalación en segundo plano sin interfaz de usuario.
 
-3. Verificación del Estado
-Tras la instalación, el servicio debe iniciarse automáticamente. Verifique su estado con el siguiente comando:
+3. Verificación del Servicio
+Confirme que el agente se está ejecutando correctamente en el sistema.
 
 PowerShell
 Get-Service windows_exporter | Select-Object Name, Status, StartType
-4. Configuración de Seguridad (Firewall)
-Para permitir que el servidor de Prometheus realice el scraping de métricas, es necesario habilitar el puerto 9182 en el Firewall de Windows.
+Estado esperado: Running
+
+Tipo de inicio: Automatic
+
+4. Configuración del Firewall
+Habilite el puerto 9182 para permitir que el servidor de Prometheus pueda recolectar los datos.
 
 PowerShell
 New-NetFirewallRule -DisplayName "Windows Exporter (Prometheus)" `
@@ -199,6 +204,11 @@ New-NetFirewallRule -DisplayName "Windows Exporter (Prometheus)" `
     -LocalPort 9182 `
     -Action Allow
 5. Validación de Métricas
-Para confirmar que el agente está operando correctamente, acceda a la interfaz de métricas local:
+Para finalizar, verifique que el endpoint de métricas responde localmente:
 
-URL: http://localhost:9182/metrics
+Vía Navegador: http://localhost:9182/metrics
+
+Vía Consola:
+
+PowerShell
+Invoke-RestMethod -Uri "http://localhost:9182/metrics"
