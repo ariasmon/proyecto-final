@@ -1,6 +1,6 @@
 # TFG: Despliegue de Infraestructura de Red Segura Híbrida en AWS con Monitorización Centralizada
 
-**Autores:** Víctor Alberjón Hidalgo y Pablo Arias Montilla
+**Autores:** "Víctor Alberjón Hidalgo y Pablo Arias Montilla" 
 
 ---
 
@@ -77,6 +77,28 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **RNF-04 (Seguridad VPN):** Las conexiones VPN deben utilizar cifrado fuerte. WireGuard emplea criptografía moderna (ChaCha20, Curve25519).
 * **RNF-05 (Rendimiento):** El Gateway debe mantener latencias de enrutamiento aceptables sin afectar significativamente el rendimiento de la red.
 * **RNF-06 (Documentación):** Toda configuración debe estar documentada y versionada para garantizar replicabilidad del entorno.
+
+### 2.3. Usuarios finales y sus necesidades
+
+El sistema está diseñado para ser utilizado por diferentes perfiles de usuario, cada uno con necesidades específicas:
+
+| Perfil | Descripción | Necesidades |
+|--------|-------------|-------------|
+| **Administrador de sistemas** | Responsable de la gestión y mantenimiento de la infraestructura | Acceso SSH al Gateway, acceso RDP al Windows Server, visualización de dashboards de monitorización, recepción de alertas |
+| **Administrador de dominio** | Gestiona el Active Directory y los usuarios del dominio | Acceso RDP al Windows Server, acceso al dominio tfg.vp |
+| **Usuario corporativo** | Usuario final que accede a recursos del dominio | Conexión VPN para acceso remoto, acceso al dominio corporativo |
+| **Operador de monitorización** | Supervisa el estado de la infraestructura | Acceso a Grafana, recepción de alertas en Telegram/Discord |
+
+#### Matriz de acceso por perfil
+
+| Recurso | Admin Sistemas | Admin Dominio | Usuario Corp. | Operador |
+|---------|---------------|---------------|---------------|----------|
+| SSH Gateway | ✓ | - | - | ✓ |
+| RDP Windows | ✓ | ✓ | - | - |
+| VPN | ✓ | ✓ | ✓ | - |
+| Grafana | ✓ | - | - | ✓ |
+| Dominio AD | ✓ | ✓ | ✓ | - |
+| Alertas | ✓ | - | - | ✓ |
 
 ---
 
@@ -672,6 +694,8 @@ curl http://localhost:9093/api/v2/status | python3 -m json.tool
 | Telegram | ✓ Funcional | Configurado con bot token y Chat ID |
 | Discord | ⏳ Pendiente | Requiere servicio intermedio para formato JSON |
 
+**Discord:** La integración con Discord se deja pendiente para futuras implementaciones. Discord requiere un servicio intermedio que transforme el formato de alertas de Alertmanager al formato JSON esperado (`{"content": "mensaje"}`). Posibles soluciones incluyen crear un servicio web intermedio o utilizar herramientas como [Prometheus Discord Webhook](https://github.com/benjojo/alertmanager-discord).
+
 #### Archivos de Configuración
 
 Los archivos de configuración de ejemplo están disponibles en el directorio `configs/` del repositorio:
@@ -683,36 +707,100 @@ Los archivos de configuración de ejemplo están disponibles en el directorio `c
 | `configs/alertmanager.yml.example` | Configuración de Alertmanager |
 | `configs/prometheus-alertmanager.defaults` | Variables de entorno de Alertmanager |
 
----
+### 4.12. Incidencias durante la implantación
 
-## 5. Trabajo pendiente
+Durante el despliegue de la infraestructura se encontraron y resolvieron diversas incidencias técnicas:
 
-### 5.1. Configuración de notificaciones con Discord
+| Incidencia | Descripción | Solución | Fecha |
+|------------|-------------|----------|-------|
+| Windows Exporter no accesible | Prometheus no podía conectar con el puerto 9182 del Windows Server | Añadir regla en Security Group de AWS para permitir tráfico desde el Gateway | Marzo |
+| Alertmanager no iniciaba | Error "permission denied" al crear directorio de datos | Crear directorio `/var/lib/prometheus/alertmanager` con permisos correctos | Marzo |
+| Alertmanager versión antigua | La versión 0.23.0 no soportaba `telegram_configs` | Actualizar a versión 0.28.1 manualmente | Marzo |
+| Discord no recibe alertas | Formato de mensaje incompatible con Discord webhook | Pendiente - requiere servicio intermedio para transformar JSON | Marzo |
 
-Discord requiere un servicio intermedio que transforme el formato de alertas de Alertmanager al formato JSON esperado por Discord (`{"content": "mensaje"}`). Se deja pendiente para futuras implementaciones.
+#### Lecciones aprendidas
 
-Posibles soluciones:
-- Crear un servicio web intermedio que reciba webhooks de Alertmanager y los transforme
-- Utilizar servicios como [Prometheus Discord Webhook](https://github.com/benjojo/alertmanager-discord)
+1. **Security Groups:** Es importante verificar que todos los puertos necesarios estén abiertos en los Security Groups de AWS antes de desplegar servicios que requieren comunicación entre instancias.
 
-### 5.2. Instalación de Windows Exporter
+2. **Versiones de software:** Las versiones de los paquetes de repositorios pueden estar desactualizadas. Es recomendable verificar la compatibilidad de características específicas (como `telegram_configs` en Alertmanager) antes de la instalación.
 
-El Windows Exporter debe instalarse en el servidor Windows (10.0.2.75) para completar la monitorización. La instalación se documenta en la sección 4.5.
+3. **Documentación:** Mantener un registro de las incidencias facilita la resolución de problemas similares en futuros despliegues y mejora la replicabilidad del entorno.
 
-Pasos pendientes:
-1. Descargar Windows Exporter desde GitHub
-2. Instalar con los módulos necesarios: `cpu`, `memory`, `logical_disk`, `net`, `os`, `system`
-3. Verificar métricas en `http://10.0.2.75:9182/metrics`
-4. Importar dashboard de Windows Server en Grafana
+### 4.13. Configuración avanzada de Active Directory
 
-### 5.3. Dashboard de Grafana para Windows Server
+Tras la implementación inicial del controlador de dominio, se realizó una configuración avanzada para estructurar correctamente el directorio activo y aplicar políticas de seguridad.
 
-Una vez instalado Windows Exporter, se recomienda importar el dashboard de Windows Server en Grafana. Dashboard recomendado: Windows Node Exporter (ID: 12496).
+#### Estado actual del dominio
 
-### 5.4. Pruebas y Validación
+| Parámetro | Valor |
+|-----------|-------|
+| Dominio | `tfg.vp` |
+| Nombre NetBIOS | `TFG` |
+| Nivel funcional del dominio | Windows Server 2016 |
+| Nivel funcional del bosque | Windows Server 2016 |
+| DNS integrado | Habilitado |
+| Catálogo global | Habilitado |
+| Credenciales de administrador | `TFG\Administrator` |
 
-Pendientes de realizar:
-- Pruebas de conectividad VPN desde clientes externos
-- Pruebas de unión al dominio Active Directory desde clientes VPN
-- Pruebas de carga en la infraestructura
-- Pruebas de failover de servicios
+#### Estructura de Unidades Organizativas (OU)
+
+Se creó una estructura de Unidades Organizativas para organizar los objetos del directorio de manera lógica:
+
+```
+TFG
+├── Usuarios
+├── Equipos
+├── Servidores
+├── Grupos
+└── Admins
+```
+
+**Nota:** Los contenedores y grupos por defecto del dominio (`Users`, `Domain Admins`, `Domain Users`, etc.) no se movieron ni modificaron para evitar errores en el dominio.
+
+#### Grupos de seguridad
+
+Se aplicó el modelo **AGDLP** (Accounts → Global Groups → Domain Local → Permissions), que es una práctica recomendada para la gestión de permisos en Active Directory:
+
+| Tipo de grupo | Prefijo | Ejemplos | Función |
+|---------------|---------|----------|---------|
+| Grupos Globales (GG_) | `GG_` | `GG_Usuarios`, `GG_Admins` | Agrupan usuarios según función |
+| Grupos Domain Local (DL_) | `DL_` | Por definir | Asignación de permisos a recursos |
+
+**Principio AGDLP:**
+1. Los **usuarios** se agregan a los **Grupos Globales (GG_)**
+2. Los **Grupos Globales** se agregan a los **Grupos Domain Local (DL_)**
+3. Los **permisos** se asignan a los **Grupos Domain Local**
+
+Esta estructura permite una gestión de permisos escalable y facilita la administración de recursos.
+
+#### GPO implementadas
+
+Se crearon y vincularon a las OUs correspondientes las siguientes políticas de grupo:
+
+| GPO | OU aplicada | Configuración principal |
+|-----|-------------|------------------------|
+| `GPO_Seguridad_Contraseñas` | Dominio | Longitud mínima 8-12 caracteres, complejidad habilitada, historial de contraseñas |
+| `GPO_Seguridad_Equipos` | OU Equipos | Firewall activado para Domain/Private/Public Profiles, bloqueo de conexiones entrantes no autorizadas |
+
+**Configuración de la GPO de contraseñas:**
+- Longitud mínima: 8 caracteres
+- Complejidad: habilitada (mayúsculas, minúsculas, números, símbolos)
+- Historial: 24 contraseñas recordadas
+- Caducidad: opcional según política organizativa
+
+**Configuración de la GPO de firewall:**
+- Perfiles Domain, Private y Public: activados
+- Bloqueo de conexiones entrantes: habilitado
+- Excepciones: puertos necesarios para AD (88/TCP Kerberos, 389/TCP LDAP, etc.)
+
+#### Observaciones y buenas prácticas
+
+1. **Contenedores por defecto:** Se mantuvieron los grupos por defecto del dominio en el contenedor `Users` sin modificaciones, evitando problemas de herencia y permisos.
+
+2. **Separación de OUs:** Se crearon OUs específicas para separar usuarios, equipos, servidores y grupos, facilitando la aplicación de GPOs específicas.
+
+3. **Convención de nombres:** Se siguió la convención profesional para grupos de seguridad (`GG_` para globales, `DL_` para domain local), mejorando la legibilidad y mantenibilidad.
+
+4. **Política de firewall:** Se aplicó una política de firewall básica para proteger todos los equipos del dominio, permitiendo únicamente el tráfico necesario para el funcionamiento de Active Directory.
+
+5. **Modelo AGDLP:** La implementación del modelo AGDLP permite una gestión de permisos granular y escalable, separando la agrupación de usuarios de la asignación de permisos.
