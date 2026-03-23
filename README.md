@@ -171,26 +171,29 @@ Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas
 Paso 1: Descarga del Instalador
 Abra PowerShell como Administrador y ejecute el siguiente comando para obtener el paquete MSI:
 
-PowerShell
+```
 $url = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
 Invoke-WebRequest -Uri $url -OutFile "C:\windows_exporter.msi"
+```
 Paso 2: Instalación del Agente
 Instale el servicio de forma silenciosa con los colectores de sistema optimizados:
 
-PowerShell
+```
 msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
-Nota: El parámetro /qn realiza una instalación desatendida en segundo plano.
+```
 
 Paso 3: Verificación y Firewall
 Asegúrese de que el servicio esté corriendo y habilite el puerto de escucha (9182):
 
-PowerShell
 # Verificar servicio
+```
 Get-Service windows_exporter
-
+```
 # Abrir puerto en el firewall
+```
 New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+```
 Paso 4: Validación de Métricas
 Para confirmar que el agente está exponiendo datos, acceda a la siguiente URL en el navegador del servidor:
 
-👉 http://localhost:9182/metrics
+ http://localhost:9182/metrics
