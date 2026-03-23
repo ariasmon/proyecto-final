@@ -182,7 +182,6 @@ Invoke-WebRequest -Uri $url -OutFile $output
 2. Instalación Silenciosa
 Instale el servicio configurando los colectores esenciales para optimizar el uso de CPU y memoria.
 
-PowerShell
 msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
 
 3. Verificación del Servicio
