@@ -93,6 +93,9 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 1. **SG-Gateway (Ubuntu):** Inbound: 22 (SSH), 3389 (RDP Forward), 3000 (Grafana). Outbound: Todo permitido.
 2. **SG-Internal (Windows):** Inbound: 3389 (RDP) e ICMP (Ping) solo desde el SG-Gateway. Outbound: Todo permitido hacia el Gateway.
 
+### 3.3 Esquema de la arquitectura
+![Diagrama de Topología de Red](imagenes/topologia.png)
+*Figura 1: Topología de red en AWS con segmentación de subredes.*
 ---
 
 ## 4. Implantación y configuración
