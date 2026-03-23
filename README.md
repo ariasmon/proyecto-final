@@ -168,39 +168,29 @@ Se crearon y vincularon a las **OUs correspondientes** las siguientes políticas
 
 
 
+Paso 1: Descarga del Instalador
+Abra PowerShell como Administrador y ejecute el siguiente comando para obtener el paquete MSI:
 
-### 1. Descarga del Binario
-Ejecute el siguiente script en **PowerShell (Administrador)** para descargar la versión estable v0.27.2.
-
-```powershell
-# Definición de variables
-$url = "[https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi](https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi)"
-$dest = "C:\windows_exporter.msi"
-
-# Ejecución de la descarga
-Invoke-WebRequest -Uri $url -OutFile $dest
-2. Instalación del Agente
-Se realiza una instalación silenciosa habilitando únicamente los colectores de recursos críticos para optimizar el rendimiento.
+PowerShell
+$url = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
+Invoke-WebRequest -Uri $url -OutFile "C:\windows_exporter.msi"
+Paso 2: Instalación del Agente
+Instale el servicio de forma silenciosa con los colectores de sistema optimizados:
 
 PowerShell
 msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
-Nota: El flag /qn indica una instalación "Quiet" (sin interfaz de usuario).
+Nota: El parámetro /qn realiza una instalación desatendida en segundo plano.
 
-3. Verificación del Servicio
-Tras la instalación, valide que el servicio esté en ejecución y configurado para inicio automático.
-
-PowerShell
-Get-Service windows_exporter | Select-Object Name, Status, StartType
-4. Apertura de Puerto en Firewall
-Habilite el tráfico entrante en el puerto TCP 9182 para permitir el scraping desde el servidor de Prometheus.
+Paso 3: Verificación y Firewall
+Asegúrese de que el servicio esté corriendo y habilite el puerto de escucha (9182):
 
 PowerShell
-New-NetFirewallRule -DisplayName "Allow Windows Exporter (9182)" `
-    -Direction Inbound `
-    -Protocol TCP `
-    -LocalPort 9182 `
-    -Action Allow
-5. Validación Local de Métricas
-Confirme la exposición de datos accediendo al endpoint local. Si responde con una lista de textos (métricas), la configuración es exitosa.
+# Verificar servicio
+Get-Service windows_exporter
 
-URL de acceso: http://localhost:9182/metrics
+# Abrir puerto en el firewall
+New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+Paso 4: Validación de Métricas
+Para confirmar que el agente está exponiendo datos, acceda a la siguiente URL en el navegador del servidor:
+
+👉 http://localhost:9182/metrics
