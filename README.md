@@ -259,7 +259,7 @@ Con esto, el servidor Windows queda preparado para exponer sus métricas del sis
 
 Para garantizar la inmutabilidad y replicabilidad del entorno, se ha adoptado una metodología GitOps utilizando **AWS CloudFormation**.
 
-Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tablas de Rutas, Security Groups e Instancias EC2) está definida de forma declarativa en un único archivo YAML (`despliegue-tfg.yaml`).
+Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tablas de Rutas, Security Groups e Instancias EC2) está definida de forma declarativa en un único archivo YAML (`despliegue-tfg.yml`).
 
 Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`. Esto permite que, en el momento de crear la pila en AWS, las instancias ejecuten automáticamente sus configuraciones internas:
 
@@ -792,6 +792,13 @@ Se crearon y vincularon a las OUs correspondientes las siguientes políticas de 
 - Perfiles Domain, Private y Public: activados
 - Bloqueo de conexiones entrantes: habilitado
 - Excepciones: puertos necesarios para AD (88/TCP Kerberos, 389/TCP LDAP, etc.)
+
+> **Nota sobre el firewall del servidor AD:** El firewall de Windows en el controlador de dominio permanece desactivado intencionadamente. La seguridad perimetral está garantizada por capas superiores:
+> - Security Groups de AWS que filtran todo el tráfico a nivel de red
+> - iptables en el Gateway Ubuntu actuando como firewall perimetral
+> - El servidor reside en una subred privada sin acceso directo desde Internet
+> 
+> La GPO `GPO_Seguridad_Equipos` aplica a **equipos clientes** que se unan al dominio corporativo (por ejemplo, portátiles conectados vía VPN), donde sí es necesario mantener el firewall activado para proteger los dispositivos individuales.
 
 #### Observaciones y buenas prácticas
 
