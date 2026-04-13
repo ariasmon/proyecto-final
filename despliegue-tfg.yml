@@ -88,14 +88,16 @@ Resources:
         - IpProtocol: -1
           CidrIp: 10.0.2.0/24
         - IpProtocol: -1
-          CidrIp: 10.0.3.0/24
+          CidrIp: 172.16.3.0/24
 
   SGInternal:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Windows Server - Solo acceso desde Gateway
+      GroupDescription: Windows Server - Acceso desde Gateway y VPN
       VpcId: !Ref VPC
       SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 172.16.3.0/24
         - IpProtocol: tcp
           FromPort: 3389
           ToPort: 3389
@@ -107,6 +109,14 @@ Resources:
         - IpProtocol: icmp
           FromPort: -1
           ToPort: -1
+          SourceSecurityGroupId: !Ref SGGateway
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          SourceSecurityGroupId: !Ref SGGateway
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
           SourceSecurityGroupId: !Ref SGGateway
 
   UbuntuGateway:
@@ -129,7 +139,10 @@ Resources:
           sysctl -w net.ipv4.ip_forward=1
           echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
           iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
+          iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
           iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+          iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
+          iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -y
           apt-get install -y iptables-persistent netfilter-persistent
@@ -156,6 +169,7 @@ Resources:
           $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
           New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
           Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1","8.8.8.8")
+          route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
           </powershell>
 
   ElasticIPGateway:
@@ -199,6 +213,14 @@ Resources:
     Properties:
       RouteTableId: !Ref RouteTablePrivada
       DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref UbuntuGateway
+
+  VpnRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTablePrivada
+      DestinationCidrBlock: 172.16.3.0/24
       InstanceId: !Ref UbuntuGateway
 
   AsociacionPrivada:

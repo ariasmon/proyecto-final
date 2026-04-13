@@ -109,11 +109,12 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 * **VPC CIDR:** `10.0.0.0/16`
 * **Subred Pública (DMZ):** `10.0.1.0/24`. Aloja el Gateway Ubuntu con IP Elástica.
 * **Subred Privada (Intranet):** `10.0.2.0/24`. Aloja el Windows Server. Su tráfico `0.0.0.0/0` apunta a la interfaz de red del Ubuntu.
+* **Subred VPN (WireGuard):** `172.16.3.0/24`. Fuera del CIDR de la VPC para evitar conflictos con las tablas de rutas de AWS.
 
 ### 3.2. Diseño de Seguridad y Accesos
 
-1. **SG-Gateway (Ubuntu):** Inbound: 22 (SSH), 3389 (RDP Forward), 3000 (Grafana). Outbound: Todo permitido.
-2. **SG-Internal (Windows):** Inbound: 3389 (RDP) e ICMP (Ping) solo desde el SG-Gateway. Outbound: Todo permitido hacia el Gateway.
+1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3389/TCP (RDP Forward), 3000/TCP (Grafana), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde SG-Gateway, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -131,17 +132,25 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 ### 4.2. Configuración del Enrutamiento y NAT en Linux
 
 ```bash
-# Habilitar IP Forwarding
+# Habilitar IP Forwarding (runtime y persistente)
 sudo sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 
-# Configuración de NAT (Masquerade)
+# NAT para subred privada hacia Internet
 sudo iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
+
+# NAT para tráfico VPN hacia subred privada
+sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
 
 # Reenvío de puerto RDP (DNAT)
 sudo iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
 
+# Forwarding VPN ↔ subred privada
+sudo iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
+sudo iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
 # Persistencia de reglas
-sudo apt update && sudo apt install iptables-persistent -y
+sudo apt update && sudo apt install -y iptables-persistent netfilter-persistent
 sudo netfilter-persistent save
 ```
 
@@ -151,10 +160,12 @@ Para garantizar la estabilidad operativa y la conectividad a través del Gateway
 
 1. **Optimización de Instancia:** Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM).
 2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `127.0.0.1` y `8.8.8.8`.
-3. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell:
+3. **Ruta estática VPN:** Ruta hacia la subred VPN (`172.16.3.0/24`) a través del Gateway (`10.0.2.1`), necesaria para que el Windows Server pueda responder a clientes VPN.
+4. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell:
 
 ```powershell
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
 ```
 
 ### 4.4. Implementación del Controlador de Dominio (Active Directory)
@@ -263,8 +274,8 @@ Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tab
 
 Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`. Esto permite que, en el momento de crear la pila en AWS, las instancias ejecuten automáticamente sus configuraciones internas:
 
-* El **Ubuntu Gateway** ejecuta un script bash en el arranque que habilita el reenvío de paquetes IP (`ip_forward`) y establece las reglas de iptables (NAT y Port Forwarding) haciéndolas persistentes.
-* El **Windows Server** ejecuta un script de PowerShell en el arranque que localiza la interfaz de red activa, le asigna la IP estática requerida para el Active Directory, configura los servidores DNS y desactiva los perfiles del cortafuegos.
+* El **Ubuntu Gateway** ejecuta un script bash en el arranque que habilita el reenvío de paquetes IP (`ip_forward`), establece las reglas de iptables (NAT, Port Forwarding y forwarding VPN→subred privada) y las hace persistentes mediante `iptables-persistent` y `netfilter-persistent`.
+* El **Windows Server** ejecuta un script de PowerShell en el arranque que localiza la interfaz de red activa, le asigna la IP estática requerida para el Active Directory, configura los servidores DNS, añade una ruta estática hacia la subred VPN (`172.16.3.0/24`) a través del Gateway, y desactiva los perfiles del cortafuegos.
 
 Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio.
 
@@ -276,14 +287,14 @@ Para permitir el acceso remoto seguro de usuarios a la infraestructura desde fue
 
 | Componente | Descripción |
 |------------|-------------|
-| **Rango VPN** | `10.0.3.0/24` - Subred dedicada para clientes VPN |
+| **Rango VPN** | `172.16.3.0/24` - Subred dedicada para clientes VPN (fuera del CIDR de la VPC) |
 | **Puerto** | UDP 51820 - Puerto estándar de WireGuard |
 | **DNS** | `10.0.2.75` - Controlador de dominio Active Directory |
 | **Gateway** | Ubuntu Server actúa como servidor VPN y NAT |
 
 La configuración permite que los clientes VPN accedan a:
 - **Subred privada** (`10.0.2.0/24`): Windows Server, Active Directory y otros recursos internos
-- **Subred VPN** (`10.0.3.0/24`): Comunicación entre clientes conectados
+- **Subred VPN** (`172.16.3.0/24`): Comunicación entre clientes conectados
 
 #### Instalación del servidor WireGuard
 
@@ -304,7 +315,7 @@ El archivo de configuración `/etc/wireguard/wg0.conf` define la interfaz VPN:
 
 ```ini
 [Interface]
-Address = 10.0.3.1/24
+Address = 172.16.3.1/24
 ListenPort = 51820
 PrivateKey = <clave_privada_servidor>
 
@@ -316,17 +327,20 @@ PrivateKey = <clave_privada_servidor>
 Se han añadido las siguientes reglas iptables para permitir el tráfico VPN y el enrutamiento hacia la subred privada:
 
 ```bash
-# Habilitar IP Forwarding (si no estaba habilitado)
-sudo sysctl -w net.ipv4.ip_forward=1
+# NAT para tráfico VPN hacia la subred privada
+sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
 
-# NAT para tráfico VPN hacia Internet y subred privada
-sudo iptables -t nat -A POSTROUTING -s 10.0.3.0/24 -o ens5 -j MASQUERADE
+# Forwarding entre VPN y subred privada
+sudo iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
+sudo iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
 
 # Persistir reglas
 sudo netfilter-persistent save
 ```
 
 Adicionalmente, el **Security Group de AWS** (`SG-Gateway`) debe permitir tráfico entrante en el puerto **UDP 51820** desde las IPs de origen autorizadas.
+
+> **Nota importante:** Dado que la subred VPN (`172.16.3.0/24`) está fuera del CIDR de la VPC (`10.0.0.0/16`), es necesario añadir una ruta en la tabla de rutas de la subred privada que dirija el tráfico VPN hacia el Gateway. Esta ruta se define automáticamente en el template de CloudFormation mediante el recurso `VpnRoute`.
 
 #### Inicio del servicio WireGuard
 
@@ -344,7 +358,7 @@ sudo wg show
 Se ha desarrollado un script de automatización (`scripts/crear-cliente-vpn.sh`) que facilita la creación de nuevos clientes VPN. Este script:
 
 1. **Genera claves** del cliente (pública y privada)
-2. **Asigna una IP automática** dentro del rango `10.0.3.2-254`
+2. **Asigna una IP automática** dentro del rango `172.16.3.2-254`
 3. **Registra el peer** en el servidor WireGuard
 4. **Crea el archivo de configuración** listo para importar
 5. **Configura el DNS** para apuntar al Active Directory
@@ -369,13 +383,13 @@ El script genera un archivo `.conf` en `/etc/wireguard/clients/` que debe ser tr
 ```ini
 [Interface]
 PrivateKey = <clave_privada_cliente>
-Address = 10.0.3.2/24
+Address = 172.16.3.2/24
 DNS = 10.0.2.75
 
 [Peer]
 PublicKey = <clave_publica_servidor>
 Endpoint = <IP_ELASTICA_GATEWAY>:51820
-AllowedIPs = 10.0.2.0/24, 10.0.3.0/24
+AllowedIPs = 10.0.2.0/24, 172.16.3.0/24
 PersistentKeepalive = 25
 ```
 
@@ -422,7 +436,7 @@ sudo wg show
 #
 # peer: (clave_publica_cliente)
 #   endpoint: (IP_cliente):puerto
-#   allowed ips: 10.0.3.2/32
+#   allowed ips: 172.16.3.2/32
 ```
 
 #### Consideraciones de seguridad
@@ -717,6 +731,7 @@ Durante el despliegue de la infraestructura se encontraron y resolvieron diversa
 | Alertmanager no iniciaba | Error "permission denied" al crear directorio de datos | Crear directorio `/var/lib/prometheus/alertmanager` con permisos correctos | Marzo |
 | Alertmanager versión antigua | La versión 0.23.0 no soportaba `telegram_configs` | Actualizar a versión 0.28.1 manualmente | Marzo |
 | Discord no recibe alertas | Formato de mensaje incompatible con Discord webhook | Pendiente - requiere servicio intermedio para transformar JSON | Marzo |
+| Clientes VPN no conectan con AD | La subred VPN original (`10.0.3.0/24`) estaba dentro del CIDR de la VPC (`10.0.0.0/16`), impidiendo que AWS enrutara tráfico de respuesta hacia clientes VPN | Cambiar subred VPN a `172.16.3.0/24` (fuera del CIDR de la VPC), añadir ruta VPN en RouteTable privada, reglas iptables de forwarding y NAT VPN→subred privada | Abril |
 
 #### Lecciones aprendidas
 
@@ -725,6 +740,8 @@ Durante el despliegue de la infraestructura se encontraron y resolvieron diversa
 2. **Versiones de software:** Las versiones de los paquetes de repositorios pueden estar desactualizadas. Es recomendable verificar la compatibilidad de características específicas (como `telegram_configs` en Alertmanager) antes de la instalación.
 
 3. **Documentación:** Mantener un registro de las incidencias facilita la resolución de problemas similares en futuros despliegues y mejora la replicabilidad del entorno.
+
+4. **Subredes VPN y CIDR de VPC:** Al configurar una subred VPN en AWS, esta no debe estar dentro del CIDR de la VPC. Si lo está, AWS no permite añadir rutas específicas en las tablas de rutas, ya que las considera tráfico local. Esto impide que las instancias de la VPC puedan responder a los clientes VPN. La subred VPN debe usar un rango CIDR externo a la VPC.
 
 ### 4.13. Configuración avanzada de Active Directory
 

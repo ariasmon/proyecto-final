@@ -1,31 +1,32 @@
 #!/bin/bash
-
-crear-cliente-vpn.sh - Genera configuracion cliente WireGuard para TFG
-
-USO:
-    sudo ./crear-cliente-vpn.sh <nombre_cliente> [ip_elastica]
-
-DESCRIPCION:
-    Este script automatiza la creacion de clientes VPN para conectarse
-    a la infraestructura del TFG y acceder al dominio Active Directory.
-
-    Requisitos:
-    - WireGuard debe estar instalado y configurado en el servidor
-    - El servidor VPN debe tener la interfaz wg0 activa
-    - Ejecutar como root (sudo)
-
-PARAMETROS:
-    nombre_cliente  - Nombre identificador del cliente (ej: usuario1, portatil_juan)
-    ip_elastica     - IP elastica del Gateway (opcional, se autodetecta si no se proporciona)
-
-CONFIGURACION GENERADA:
-    - Rango VPN: 10.0.3.0/24
-    - DNS: 10.0.2.75 (Controlador de Dominio Active Directory)
-    - Acceso: Subred privada (10.0.2.0/24) y VPN (10.0.3.0/24)
-
-EJEMPLOS:
-    sudo ./crear-cliente-vpn.sh usuario1
-    sudo ./crear-cliente-vpn.sh portatil_juan 54.123.45.67
+#
+# crear-cliente-vpn.sh - Genera configuracion cliente WireGuard para TFG
+#
+# USO:
+#     sudo ./crear-cliente-vpn.sh <nombre_cliente> [ip_elastica]
+#
+# DESCRIPCION:
+#     Este script automatiza la creacion de clientes VPN para conectarse
+#     a la infraestructura del TFG y acceder al dominio Active Directory.
+#
+#     Requisitos:
+#     - WireGuard debe estar instalado y configurado en el servidor
+#     - El servidor VPN debe tener la interfaz wg0 activa
+#     - Ejecutar como root (sudo)
+#
+# PARAMETROS:
+#     nombre_cliente  - Nombre identificador del cliente (ej: usuario1, portatil_juan)
+#     ip_elastica     - IP elastica del Gateway (opcional, se autodetecta si no se proporciona)
+#
+# CONFIGURACION GENERADA:
+#     - Rango VPN: 172.16.3.0/24
+#     - DNS: 10.0.2.75 (Controlador de Dominio Active Directory)
+#     - Acceso: Subred privada (10.0.2.0/24) y VPN (172.16.3.0/24)
+#
+# EJEMPLOS:
+#     sudo ./crear-cliente-vpn.sh usuario1
+#     sudo ./crear-cliente-vpn.sh portatil_juan 54.123.45.67
+#
 
 set -e
 
@@ -48,7 +49,7 @@ IP_ELASTICA="${2:-}"
 WIREGUARD_DIR="/etc/wireguard"
 CLIENTS_DIR="/etc/wireguard/clients"
 WG_INTERFACE="wg0"
-VPN_SUBNET="10.0.3"
+VPN_SUBNET="172.16.3"
 AD_DNS="10.0.2.75"
 PRIVATE_SUBNET="10.0.2.0/24"
 
