@@ -217,13 +217,26 @@ Finalmente, se confirmó que el servidor Windows mantiene conectividad hacia Int
 
 ### 4.5. Implementación de Windows Exporter para Monitorización
 
-Con el objetivo de permitir la monitorización del servidor Windows dentro de la infraestructura del proyecto, se implementó **Windows Exporter**, una herramienta que expone métricas del sistema operativo Windows en un formato compatible con sistemas de monitorización como Prometheus.
+Con el objetivo de permitir la monitorización del servidor Windows dentro de la infraestructura del proyecto, se implementó **Windows Exporter**, una herramienta que expone métricas del sistema operativo Windows en un formato compatible con Prometheus.
 
 Windows Exporter recopila información del sistema como el uso de CPU, memoria, disco y red, y la expone a través de un endpoint HTTP interno que puede ser consultado desde la red privada.
 
-#### Instalación de Windows Exporter
+#### Paso 1: Descarga del instalador
 
-La instalación se realizó en el servidor **Windows Server 2022** mediante el paquete instalador en formato `.msi`. Durante el proceso se configuraron los *collectors*, responsables de recopilar diferentes métricas del sistema.
+Abrir PowerShell como Administrador y ejecutar el siguiente comando para descargar el paquete MSI:
+
+```powershell
+$url = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
+Invoke-WebRequest -Uri $url -OutFile "C:\windows_exporter.msi"
+```
+
+#### Paso 2: Instalación del agente
+
+Instalar el servicio de forma silenciosa con los *collectors* optimizados para el entorno:
+
+```powershell
+msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
+```
 
 **Módulos habilitados:**
 
@@ -238,9 +251,23 @@ La instalación se realizó en el servidor **Windows Server 2022** mediante el p
 
 Una vez completada la instalación, Windows Exporter se ejecuta automáticamente como un servicio de Windows llamado **windows_exporter**.
 
-#### Exposición de métricas
+#### Paso 3: Verificación y Firewall
 
-Windows Exporter expone las métricas a través de un servidor HTTP que escucha en el puerto **9182**. Para verificar el correcto funcionamiento del servicio, se accedió desde el propio servidor a:
+Verificar que el servicio está en ejecución y habilitar el puerto de escucha:
+
+```powershell
+# Verificar estado del servicio
+Get-Service windows_exporter
+
+# Abrir puerto en el firewall de Windows
+New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+```
+
+> **Nota:** Aunque el firewall de Windows está desactivado en el controlador de dominio (véase la sección 4.3), esta regla se crea por completitud de configuración. Si el firewall se reactivara en el futuro, el puerto 9182 quedaría automáticamente habilitado sin intervención adicional.
+
+#### Paso 4: Validación de métricas
+
+Para confirmar que el agente está exponiendo datos correctamente, acceder desde el navegador del servidor a:
 
 ```
 http://localhost:9182/metrics
@@ -254,14 +281,6 @@ windows_memory_available_bytes
 windows_logical_disk_free_bytes
 windows_os_info
 windows_system_system_up_time
-```
-
-#### Configuración del firewall
-
-Para permitir que otros equipos dentro de la red privada puedan acceder a las métricas, se creó una regla en el firewall de Windows que permite conexiones entrantes al puerto 9182:
-
-```powershell
-New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
 ```
 
 Con esto, el servidor Windows queda preparado para exponer sus métricas del sistema de manera centralizada, lo que permite su monitorización desde Prometheus en el servidor Gateway.
@@ -528,6 +547,8 @@ scrape_configs:
 | `node` | Métricas de Ubuntu Gateway | 9100 |
 | `windows-server` | Métricas de Windows Server | 9182 |
 
+> **Nota sobre intervalos de recolección:** El job `prometheus` tiene configurado un `scrape_interval` de 5s para la automonitorización del propio servidor. Los jobs `node` y `windows-server` utilizan el intervalo por defecto de 1 minuto. Este diseño es deliberado: dadas las limitaciones de recursos de las instancias (t3.micro para el Gateway y t3.small para Windows Server), un intervalo de 1 minuto proporciona suficiente granularidad para las consultas `rate(...[5m])` del dashboard y las reglas de alerta, sin comprometer la estabilidad del sistema.
+
 #### Reglas de Alerta
 
 Se han configurado las siguientes reglas de alerta en `/etc/prometheus/alert_rules.yml`:
@@ -596,6 +617,119 @@ Se recomienda importar el dashboard **Node Exporter Full** (ID: 1860) desde Graf
 4. Importar
 
 Este dashboard proporciona una vista completa de las métricas del sistema Ubuntu.
+
+#### Dashboard de Windows Server
+
+Se configuró un dashboard específico en Grafana para visualizar el estado del Windows Server. El dashboard se adaptó a las métricas reales expuestas por Windows Exporter y al datasource Prometheus disponible en el entorno.
+
+**Adaptación del dashboard:**
+
+Se tomó una plantilla de dashboard de Windows Exporter y se corrigieron las consultas PromQL para ajustarlas a las métricas que realmente expone el servidor Windows, evitando paneles con errores, valores vacíos o consultas incompatibles con el exporter instalado. También se eliminó la dependencia de un UID fijo en el datasource para hacer el dashboard más portable entre instalaciones de Grafana.
+
+**Métricas utilizadas:**
+
+| Métrica | Descripción |
+|---------|-------------|
+| `windows_cpu_time_total` | Tiempo de CPU por modo |
+| `windows_os_physical_memory_free_bytes` | Memoria física libre |
+| `windows_os_visible_memory_bytes` | Memoria física total visible |
+| `windows_logical_disk_free_bytes` | Espacio libre en disco |
+| `windows_logical_disk_size_bytes` | Tamaño total del disco |
+| `windows_net_bytes_sent_total` | Bytes enviados por red |
+| `windows_net_bytes_received_total` | Bytes recibidos por red |
+| `windows_os_processes` | Número de procesos |
+| `windows_system_threads` | Número de hilos del sistema |
+| `windows_system_system_up_time` | Tiempo de actividad del sistema |
+| `windows_os_time` | Hora del sistema |
+| `windows_system_processor_queue_length` | Longitud de cola del procesador |
+| `windows_service_state` | Estado de los servicios del sistema |
+
+**Consultas PromQL recomendadas:**
+
+Uso de CPU:
+
+```promql
+100 * (1 - avg(rate(windows_cpu_time_total{instance=~"$server",mode="idle"}[5m])))
+```
+
+Uso de memoria:
+
+```promql
+100 * (1 - windows_os_physical_memory_free_bytes{instance=~"$server"} / windows_os_visible_memory_bytes{instance=~"$server"})
+```
+
+Uso de disco:
+
+```promql
+100 - (windows_logical_disk_free_bytes{instance=~"$server",volume!~"HarddiskVolume.+"} / windows_logical_disk_size_bytes{instance=~"$server",volume!~"HarddiskVolume.+"}) * 100
+```
+
+Tráfico de red (envío):
+
+```promql
+rate(windows_net_bytes_sent_total{instance=~"$server"}[5m]) * 8
+```
+
+Tráfico de red (recepción):
+
+```promql
+rate(windows_net_bytes_received_total{instance=~"$server"}[5m]) * 8
+```
+
+Número de procesos:
+
+```promql
+windows_os_processes{instance=~"$server"}
+```
+
+Hilos del sistema:
+
+```promql
+windows_system_threads{instance=~"$server"}
+```
+
+Tiempo activo del sistema:
+
+```promql
+time() - windows_system_system_up_time{instance=~"$server"}
+```
+
+Desfase horario aproximado:
+
+```promql
+abs(time() - windows_os_time{instance=~"$server"})
+```
+
+Cola de procesador:
+
+```promql
+windows_system_processor_queue_length{instance=~"$server"}
+```
+
+**Visualizaciones recomendadas:**
+
+| Tipo de panel | Métricas recomendadas |
+|---------------|----------------------|
+| Stat | CPU, memoria, procesos, hilos, uptime, desfase horario |
+| Gauge | Memoria, uso de disco |
+| Bar gauge | Uso de discos por partición, estado de servicios |
+| Time series | Tráfico de red, CPU histórica, memoria histórica, disco histórica, presión de procesador |
+
+**Problemas detectados y corregidos:**
+
+1. **Fuentes de datos con UID fijo:** Se eliminó la dependencia de un UID fijo para hacer el dashboard más portable entre instalaciones de Grafana.
+2. **Consultas no compatibles con Windows Exporter:** Se sustituyeron consultas procedentes de Node Exporter o de otros entornos Linux por equivalentes válidos para Windows.
+3. **Valores mostrados como N/A o No data:** Se corrigieron paneles que dependían de métricas inexistentes en el exporter instalado o de expresiones PromQL incorrectas.
+4. **Unidades incorrectas:** Se ajustaron las unidades de los paneles para mostrar porcentaje, bytes, segundos o bits por segundo según la naturaleza de cada métrica.
+
+**Métricas descartadas:**
+
+Las siguientes métricas fueron eliminadas del dashboard por no estar disponibles en Windows Exporter o pertenecer a otros exporters:
+
+- `windows_cs_physical_memory_bytes` (no disponible en la versión instalada)
+- `windows_process_thread_count` (métrica inexistente)
+- `windows_time_computed_time_offset_seconds` (métrica inexistente)
+- `windows_process_start_time` (métrica inexistente)
 
 ### 4.11. Implementación de Alertmanager para Notificaciones
 
@@ -828,3 +962,54 @@ Se crearon y vincularon a las OUs correspondientes las siguientes políticas de 
 4. **Política de firewall:** Se aplicó una política de firewall básica para proteger todos los equipos del dominio, permitiendo únicamente el tráfico necesario para el funcionamiento de Active Directory.
 
 5. **Modelo AGDLP:** La implementación del modelo AGDLP permite una gestión de permisos granular y escalable, separando la agrupación de usuarios de la asignación de permisos.
+
+### 4.14. Auditoría de seguridad y Sysmon
+
+Con el objetivo de reforzar la trazabilidad del Windows Server, se habilitaron políticas de auditoría del sistema y se instaló **Sysmon** como herramienta complementaria de monitorización de eventos avanzados.
+
+#### Políticas de auditoría activadas
+
+Se habilitaron las siguientes directivas de auditoría mediante **GPO del dominio**:
+
+- Audit logon events
+- Audit account logon events
+- Audit account management
+- Audit policy change
+- Audit object access
+- Audit process tracking
+
+Además, se configuraron las siguientes categorías de auditoría avanzada dentro de la GPO, en **Computer Configuration > Windows Settings > Security Settings > Advanced Audit Policy Configuration**:
+
+- Logon/Logoff
+- Account Logon
+- Account Management
+- Object Access
+- Policy Change
+- Detailed Tracking
+
+También se habilitaron de forma específica los siguientes eventos avanzados:
+
+- Audit Logon
+- Audit Logoff
+- Audit Account Lockout
+- Audit User Account Management
+- Audit Security Group Management
+- Audit Directory Service Access
+- Audit File Share
+- Audit Process Creation
+
+#### Instalación de Sysmon
+
+Sysmon se instaló para ampliar la capacidad de análisis de procesos, conexiones y actividad sospechosa en el servidor. La instalación se realizó utilizando un fichero de configuración XML con reglas de filtrado y detección:
+
+```powershell
+# Descargar Sysmon desde Microsoft Sysinternals
+Invoke-WebRequest -Uri "https://download.sysinternals.com/files/Sysmon.zip" -OutFile "C:\Sysmon.zip"
+Expand-Archive -Path "C:\Sysmon.zip" -DestinationPath "C:\Sysmon"
+
+# Instalar Sysmon con configuración XML
+cd C:\Sysmon
+sysmon64.exe -accepteula -i sysmonconfig.xml
+```
+
+> **Nota:** Para que la instalación funcione correctamente, el fichero `sysmonconfig.xml` debe estar en la misma carpeta que `sysmon64.exe` o indicarse con ruta completa.
