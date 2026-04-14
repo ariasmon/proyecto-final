@@ -197,3 +197,152 @@ Paso 4: Validación de Métricas
 Para confirmar que el agente está exponiendo datos, acceda a la siguiente URL en el navegador del servidor:
 
  http://localhost:9182/metrics
+
+
+# Documentacion de Grafana
+
+## Objetivo
+
+Se configuro Grafana para visualizar el estado del Windows Server dentro de la infraestructura del TFG. El dashboard se adapto a las metricas reales expuestas por Windows Exporter y al datasource Prometheus disponible en el entorno.
+
+## Trabajo realizado
+
+### 1. Adaptacion del dashboard
+
+Se tomo una plantilla de dashboard de Windows Exporter y se corrigieron las consultas PromQL para ajustarlas a las metricas que realmente expone el servidor Windows. El objetivo fue evitar paneles con errores, valores vacios o consultas incompatibles con el exporter instalado.
+
+### 2. Configuracion del datasource
+
+Grafana se configuro para utilizar el datasource Prometheus llamado `Prometheus`, apuntando a la instancia local disponible en el entorno.
+
+### 3. Normalizacion de variables
+
+Se revisaron las variables del dashboard para que el selector de servidor funcionara correctamente con la serie de metricas del Windows Server.
+
+### 4. Limpieza de consultas no compatibles
+
+Se descartaron consultas que pertenecian a otros exporters o a metricas inexistentes en Windows Exporter. En concreto, se sustituyeron o eliminaron referencias a:
+
+- `windows_cs_physical_memory_bytes`
+- `windows_process_thread_count`
+- `windows_time_computed_time_offset_seconds`
+- `windows_process_start_time`
+
+Tambien se corrigieron consultas que dependian de etiquetas o patrones no validos para el entorno Windows.
+
+## Metricas que se usaron
+
+Las metricas que si se aprovecharon en el dashboard fueron estas:
+
+- `windows_cpu_time_total`
+- `windows_os_physical_memory_free_bytes`
+- `windows_os_visible_memory_bytes`
+- `windows_logical_disk_free_bytes`
+- `windows_logical_disk_size_bytes`
+- `windows_net_bytes_sent_total`
+- `windows_net_bytes_received_total`
+- `windows_os_processes`
+- `windows_system_threads`
+- `windows_system_system_up_time`
+- `windows_os_time`
+- `windows_system_processor_queue_length`
+- `windows_service_state`
+
+## Consultas finales recomendadas
+
+### Uso de CPU
+
+```promql
+100 * (1 - avg(rate(windows_cpu_time_total{instance=~"$server",mode="idle"}[5m])))
+```
+
+### Uso de memoria
+
+```promql
+100 * (1 - windows_os_physical_memory_free_bytes{instance=~"$server"} / windows_os_visible_memory_bytes{instance=~"$server"})
+```
+
+### Uso de disco
+
+```promql
+100 - (windows_logical_disk_free_bytes{instance=~"$server",volume!~"HarddiskVolume.+"} / windows_logical_disk_size_bytes{instance=~"$server",volume!~"HarddiskVolume.+"}) * 100
+```
+
+### Trafico de red
+
+```promql
+rate(windows_net_bytes_sent_total{instance=~"$server"}[5m]) * 8
+```
+
+```promql
+rate(windows_net_bytes_received_total{instance=~"$server"}[5m]) * 8
+```
+
+### Numero de procesos
+
+```promql
+windows_os_processes{instance=~"$server"}
+```
+
+### Hilos del sistema
+
+```promql
+windows_system_threads{instance=~"$server"}
+```
+
+### Tiempo activo del sistema
+
+```promql
+time() - windows_system_system_up_time{instance=~"$server"}
+```
+
+### Desfase horario aproximado
+
+```promql
+abs(time() - windows_os_time{instance=~"$server"})
+```
+
+### Cola de procesador
+
+```promql
+windows_system_processor_queue_length{instance=~"$server"}
+```
+
+## Visualizaciones recomendadas
+
+- **Stat**: CPU, memoria, procesos, hilos, uptime y desfase horario.
+- **Gauge**: memoria y uso de disco si se quiere un indicador visual.
+- **Bar gauge**: uso de discos por particion y estado de servicios.
+- **Time series**: trafico de red, CPU historica, memoria historica, disco historico y presion de procesador.
+
+## Problemas detectados y corregidos
+
+### 1. Fuentes de datos con UID fijo
+
+Se elimino la dependencia de un UID fijo para hacer el dashboard mas portable entre instalaciones de Grafana.
+
+### 2. Consultas no compatibles con Windows Exporter
+
+Se sustituyeron consultas procedentes de Node Exporter o de otros entornos Linux por equivalentes validos para Windows.
+
+### 3. Valores mostrados como N/A o No data
+
+Se corrigieron paneles que dependian de metricas inexistentes en el exporter instalado o de expresiones PromQL incorrectas.
+
+### 4. Unidades incorrectas
+
+Se ajustaron las unidades de los paneles para mostrar porcentaje, bytes, segundos o bits por segundo segun la naturaleza de cada metrica.
+
+## Resultado final
+
+El dashboard quedo adaptado al Windows Server del proyecto, con metricas validas, consultas funcionales y una estructura util para supervisar:
+
+- rendimiento de CPU
+- consumo de memoria
+- uso de disco
+- trafico de red
+- estado general del sistema
+- procesos y hilos
+- uptime y desfase horario
+- servicios del sistema cuando esten disponibles
+
