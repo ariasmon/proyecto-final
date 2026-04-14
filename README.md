@@ -346,3 +346,49 @@ El dashboard quedo adaptado al Windows Server del proyecto, con metricas validas
 - uptime y desfase horario
 - servicios del sistema cuando esten disponibles
 
+# 6. Auditoría de seguridad y Sysmon
+
+Con el objetivo de reforzar la trazabilidad del Windows Server, se habilitaron políticas de auditoría del sistema y se instaló Sysmon como herramienta complementaria de monitorización de eventos avanzados.
+
+#### Políticas de auditoría activadas
+
+Se habilitaron las siguientes directivas de auditoría en el servidor:
+
+- Audit logon events
+- Audit account logon events
+- Audit account management
+- Audit policy change
+- Audit object access
+- Audit process tracking
+
+Además, dentro de **Computer Configuration > Windows Settings > Security Settings > Advanced Audit Policy Configuration**, se activaron estas categorías:
+
+- Logon/Logoff
+- Account Logon
+- Account Management
+- Object Access
+- Policy Change
+- Detailed Tracking
+
+También se habilitaron de forma específica los siguientes eventos avanzados:
+
+- Audit Logon
+- Audit Logoff
+- Audit Account Lockout
+- Audit User Account Management
+- Audit Security Group Management
+- Audit Directory Service Access
+- Audit File Share
+- Audit Process Creation
+
+#### Instalación de Sysmon
+
+Sysmon se instaló para ampliar la capacidad de análisis de procesos, conexiones y actividad sospechosa en el servidor. La instalación se realizó utilizando un fichero de configuración XML con reglas de filtrado y detección.
+
+```powershell
+sysmon64.exe -accepteula -i sysmonconfig.xml
+```
+
+Este comando instala Sysmon y aplica la configuración definida en `sysmonconfig.xml`. Para que la instalación funcione correctamente, el ejecutable y el fichero XML deben estar en la misma carpeta o indicarse con ruta completa.
+
+
