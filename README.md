@@ -219,16 +219,7 @@ Grafana se configuro para utilizar el datasource Prometheus llamado `Prometheus`
 
 Se revisaron las variables del dashboard para que el selector de servidor funcionara correctamente con la serie de metricas del Windows Server.
 
-### 4. Limpieza de consultas no compatibles
 
-Se descartaron consultas que pertenecian a otros exporters o a metricas inexistentes en Windows Exporter. En concreto, se sustituyeron o eliminaron referencias a:
-
-- `windows_cs_physical_memory_bytes`
-- `windows_process_thread_count`
-- `windows_time_computed_time_offset_seconds`
-- `windows_process_start_time`
-
-Tambien se corrigieron consultas que dependian de etiquetas o patrones no validos para el entorno Windows.
 
 ## Metricas que se usaron
 
@@ -307,44 +298,6 @@ abs(time() - windows_os_time{instance=~"$server"})
 ```promql
 windows_system_processor_queue_length{instance=~"$server"}
 ```
-
-## Visualizaciones recomendadas
-
-- **Stat**: CPU, memoria, procesos, hilos, uptime y desfase horario.
-- **Gauge**: memoria y uso de disco si se quiere un indicador visual.
-- **Bar gauge**: uso de discos por particion y estado de servicios.
-- **Time series**: trafico de red, CPU historica, memoria historica, disco historico y presion de procesador.
-
-## Problemas detectados y corregidos
-
-### 1. Fuentes de datos con UID fijo
-
-Se elimino la dependencia de un UID fijo para hacer el dashboard mas portable entre instalaciones de Grafana.
-
-### 2. Consultas no compatibles con Windows Exporter
-
-Se sustituyeron consultas procedentes de Node Exporter o de otros entornos Linux por equivalentes validos para Windows.
-
-### 3. Valores mostrados como N/A o No data
-
-Se corrigieron paneles que dependian de metricas inexistentes en el exporter instalado o de expresiones PromQL incorrectas.
-
-### 4. Unidades incorrectas
-
-Se ajustaron las unidades de los paneles para mostrar porcentaje, bytes, segundos o bits por segundo segun la naturaleza de cada metrica.
-
-## Resultado final
-
-El dashboard quedo adaptado al Windows Server del proyecto, con metricas validas, consultas funcionales y una estructura util para supervisar:
-
-- rendimiento de CPU
-- consumo de memoria
-- uso de disco
-- trafico de red
-- estado general del sistema
-- procesos y hilos
-- uptime y desfase horario
-- servicios del sistema cuando esten disponibles
 
 # 6. Auditoría de seguridad y Sysmon
 
