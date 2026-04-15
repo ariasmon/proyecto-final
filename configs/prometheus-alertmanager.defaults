@@ -1,4 +1,0 @@
-# Configuración de entorno para Alertmanager
-# Colocar en: /etc/default/prometheus-alertmanager
-
-ARGS="--storage.path=/var/lib/prometheus/alertmanager --config.file=/etc/prometheus/alertmanager.yml"

@@ -1,5 +1,5 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Infraestructura TFG: VPC, Subredes, Security Groups, Instancias y Enrutamiento'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Infraestructura TFG: VPC, Subredes, Security Groups, Instancias y Enrutamiento"
 
 Parameters:
   KeyName:
@@ -7,12 +7,12 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
   LatestUbuntuAMI:
     Description: Ubuntu 22.04 LTS (auto)
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
   LatestWindowsAMI:
     Description: Windows Server 2022 (auto)
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base'
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
 
 Resources:
   VPC:
@@ -39,7 +39,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -50,7 +50,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      AvailabilityZone: !Select [0, !GetAZs ""]
       Tags:
         - Key: Name
           Value: Subred-Privada-Intranet
@@ -126,7 +126,7 @@ Resources:
       ImageId: !Ref LatestUbuntuAMI
       KeyName: !Ref KeyName
       NetworkInterfaces:
-        - DeviceIndex: '0'
+        - DeviceIndex: "0"
           SubnetId: !Ref SubnetPublica
           GroupSet: [!Ref SGGateway]
       SourceDestCheck: false
@@ -145,8 +145,9 @@ Resources:
           iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -y
-          apt-get install -y iptables-persistent netfilter-persistent
+          apt-get install -y iptables-persistent netfilter-persistent git
           netfilter-persistent save
+          git clone https://github.com/ariasmon/proyecto-final.git /home/ubuntu/despliegue
 
   WindowsInternal:
     Type: AWS::EC2::Instance
@@ -155,7 +156,7 @@ Resources:
       ImageId: !Ref LatestWindowsAMI
       KeyName: !Ref KeyName
       NetworkInterfaces:
-        - DeviceIndex: '0'
+        - DeviceIndex: "0"
           SubnetId: !Ref SubnetPrivada
           GroupSet: [!Ref SGInternal]
           PrivateIpAddress: 10.0.2.75
@@ -235,7 +236,8 @@ Outputs:
     Value: !Ref ElasticIPGateway
   URIGrafana:
     Description: URL de acceso a Grafana
-    Value: !Sub 'http://${ElasticIPGateway}:3000'
+    Value: !Sub "http://${ElasticIPGateway}:3000"
   URIPrometheus:
     Description: URL de acceso a Prometheus (solo desde VPC)
-    Value: !Sub 'http://${ElasticIPGateway}:9090'
+    Value: !Sub "http://${ElasticIPGateway}:9090"
+

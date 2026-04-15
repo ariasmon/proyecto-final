@@ -66,7 +66,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **RF-05 (Dashboard Unificado):** Grafana debe mostrar el estado de recursos de ambos servidores.
 * **RF-06 (Active Directory):** Implementar dominio Windows con AD para gestión centralizada de usuarios y recursos.
 * **RF-07 (Acceso VPN):** Configurar WireGuard para permitir acceso remoto seguro de usuarios al dominio corporativo.
-* **RF-08 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram/Discord) ante anomalías críticas.
+* **RF-08 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram) ante anomalías críticas.
 * **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP (3389).
 
 ### 2.2. Requisitos No Funcionales (RNF)
@@ -87,7 +87,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 | **Administrador de sistemas** | Responsable de la gestión y mantenimiento de la infraestructura | Acceso SSH al Gateway, acceso RDP al Windows Server, visualización de dashboards de monitorización, recepción de alertas |
 | **Administrador de dominio** | Gestiona el Active Directory y los usuarios del dominio | Acceso RDP al Windows Server, acceso al dominio tfg.vp |
 | **Usuario corporativo** | Usuario final que accede a recursos del dominio | Conexión VPN para acceso remoto, acceso al dominio corporativo |
-| **Operador de monitorización** | Supervisa el estado de la infraestructura | Acceso a Grafana, recepción de alertas en Telegram/Discord |
+| **Operador de monitorización** | Supervisa el estado de la infraestructura | Acceso a Grafana, recepción de alertas en Telegram |
 
 #### Matriz de acceso por perfil
 
@@ -289,14 +289,218 @@ Con esto, el servidor Windows queda preparado para exponer sus métricas del sis
 
 Para garantizar la inmutabilidad y replicabilidad del entorno, se ha adoptado una metodología GitOps utilizando **AWS CloudFormation**.
 
-Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tablas de Rutas, Security Groups e Instancias EC2) está definida de forma declarativa en un único archivo YAML (`despliegue-tfg.yml`).
+Toda la infraestructura descrita en los apartados anteriores (VPC, Subredes, Tablas de Rutas, Security Groups e Instancias EC2) está definida de forma declarativa en un único archivo YAML (`despliegue-tfg.yml`). A continuación se muestran los fragmentos más representativos del stack.
 
-Adicionalmente, se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`. Esto permite que, en el momento de crear la pila en AWS, las instancias ejecuten automáticamente sus configuraciones internas:
+#### Estructura del stack
 
-* El **Ubuntu Gateway** ejecuta un script bash en el arranque que habilita el reenvío de paquetes IP (`ip_forward`), establece las reglas de iptables (NAT, Port Forwarding y forwarding VPN→subred privada) y las hace persistentes mediante `iptables-persistent` y `netfilter-persistent`.
-* El **Windows Server** ejecuta un script de PowerShell en el arranque que localiza la interfaz de red activa, le asigna la IP estática requerida para el Active Directory, configura los servidores DNS, añade una ruta estática hacia la subred VPN (`172.16.3.0/24`) a través del Gateway, y desactiva los perfiles del cortafuegos.
+El archivo `despliegue-tfg.yml` define los siguientes recursos de forma declarativa:
 
-Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio.
+| Recurso | Tipo AWS CloudFormation | Descripción |
+|--------|------------------------|-------------|
+| VPC | `AWS::EC2::VPC` | Red virtual con CIDR `10.0.0.0/16` |
+| InternetGateway | `AWS::EC2::InternetGateway` | Puerta de enlace a Internet |
+| SubnetPublica | `AWS::EC2::Subnet` | Subred DMZ `10.0.1.0/24` |
+| SubnetPrivada | `AWS::EC2::Subnet` | Subred Intranet `10.0.2.0/24` |
+| SGGateway | `AWS::EC2::SecurityGroup` | Reglas de firewall del Gateway |
+| SGInternal | `AWS::EC2::SecurityGroup` | Reglas de firewall del Windows Server |
+| UbuntuGateway | `AWS::EC2::Instance` | Instancia NAT Gateway con UserData |
+| WindowsInternal | `AWS::EC2::Instance` | Servidor AD con UserData |
+| ElasticIPGateway | `AWS::EC2::EIP` | IP pública fija del Gateway |
+| RouteTablePublica | `AWS::EC2::RouteTable` | Tabla de rutas pública (→ IGW) |
+| RouteTablePrivada | `AWS::EC2::RouteTable` | Tabla de rutas privada (→ Ubuntu) |
+| DefaultPrivateRoute | `AWS::EC2::Route` | Ruta `0.0.0.0/0` → Ubuntu Gateway |
+| VpnRoute | `AWS::EC2::Route` | Ruta `172.16.3.0/24` → Ubuntu Gateway |
+
+#### VPC y subredes
+
+```yaml
+VPC:
+  Type: AWS::EC2::VPC
+  Properties:
+    CidrBlock: 10.0.0.0/16
+    EnableDnsSupport: true
+    EnableDnsHostnames: true
+    Tags:
+      - Key: Name
+        Value: VPC-TFG
+
+SubnetPublica:
+  Type: AWS::EC2::Subnet
+  Properties:
+    VpcId: !Ref VPC
+    CidrBlock: 10.0.1.0/24
+    AvailabilityZone: !Select [0, !GetAZs ""]
+    MapPublicIpOnLaunch: true
+    Tags:
+      - Key: Name
+        Value: Subred-Publica-DMZ
+
+SubnetPrivada:
+  Type: AWS::EC2::Subnet
+  Properties:
+    VpcId: !Ref VPC
+    CidrBlock: 10.0.2.0/24
+    AvailabilityZone: !Select [0, !GetAZs ""]
+    Tags:
+      - Key: Name
+        Value: Subred-Privada-Intranet
+```
+
+#### Security Groups
+
+El Security Group del Gateway define las reglas de acceso perimetral:
+
+```yaml
+SGGateway:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+    GroupDescription: Gateway Ubuntu - SSH, RDP, Grafana, WireGuard, Prometheus y trafico interno
+    VpcId: !Ref VPC
+    SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 3000
+        ToPort: 3000
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 9090
+        ToPort: 9090
+        CidrIp: 10.0.0.0/16
+      - IpProtocol: tcp
+        FromPort: 9093
+        ToPort: 9093
+        CidrIp: 10.0.0.0/16
+      - IpProtocol: udp
+        FromPort: 51820
+        ToPort: 51820
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: -1
+        CidrIp: 10.0.2.0/24
+      - IpProtocol: -1
+        CidrIp: 172.16.3.0/24
+```
+
+El Security Group del Windows Server solo permite tráfico desde el Gateway y la VPN:
+
+```yaml
+SGInternal:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+    GroupDescription: Windows Server - Acceso desde Gateway y VPN
+    VpcId: !Ref VPC
+    SecurityGroupIngress:
+      - IpProtocol: -1
+        CidrIp: 172.16.3.0/24
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
+        SourceSecurityGroupId: !Ref SGGateway
+      - IpProtocol: tcp
+        FromPort: 9182
+        ToPort: 9182
+        SourceSecurityGroupId: !Ref SGGateway
+      - IpProtocol: tcp
+        FromPort: 53
+        ToPort: 53
+        SourceSecurityGroupId: !Ref SGGateway
+      - IpProtocol: udp
+        FromPort: 53
+        ToPort: 53
+        SourceSecurityGroupId: !Ref SGGateway
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        SourceSecurityGroupId: !Ref SGGateway
+```
+
+#### Tablas de rutas
+
+La tabla de rutas privada enruta todo el tráfico saliente a través del Gateway Ubuntu, e incluye la ruta VPN para que el Windows Server pueda responder a los clientes conectados:
+
+```yaml
+DefaultPrivateRoute:
+  Type: AWS::EC2::Route
+  Properties:
+    RouteTableId: !Ref RouteTablePrivada
+    DestinationCidrBlock: 0.0.0.0/0
+    InstanceId: !Ref UbuntuGateway
+
+VpnRoute:
+  Type: AWS::EC2::Route
+  DependsOn: VPCGatewayAttachment
+  Properties:
+    RouteTableId: !Ref RouteTablePrivada
+    DestinationCidrBlock: 172.16.3.0/24
+    InstanceId: !Ref UbuntuGateway
+```
+
+#### Zero-Touch Provisioning (UserData)
+
+Se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`, que permite que las instancias se configuren automáticamente en el primer arranque.
+
+**Ubuntu Gateway** — Configuración automática de NAT, iptables y persistencia:
+
+```yaml
+UbuntuGateway:
+  Type: AWS::EC2::Instance
+  Properties:
+    InstanceType: t3.micro
+    ImageId: !Ref LatestUbuntuAMI
+    KeyName: !Ref KeyName
+    NetworkInterfaces:
+      - DeviceIndex: "0"
+        SubnetId: !Ref SubnetPublica
+        GroupSet: [!Ref SGGateway]
+    SourceDestCheck: false
+    UserData:
+      Fn::Base64: !Sub |
+        #!/bin/bash
+        sysctl -w net.ipv4.ip_forward=1
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+        iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
+        iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
+        iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+        iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
+        iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y
+        apt-get install -y iptables-persistent netfilter-persistent
+        netfilter-persistent save
+```
+
+**Windows Server** — Asignación de IP estática, DNS, ruta VPN y desactivación del firewall:
+
+```yaml
+WindowsInternal:
+  Type: AWS::EC2::Instance
+  Properties:
+    InstanceType: t3.small
+    ImageId: !Ref LatestWindowsAMI
+    KeyName: !Ref KeyName
+    NetworkInterfaces:
+      - DeviceIndex: "0"
+        SubnetId: !Ref SubnetPrivada
+        GroupSet: [!Ref SGInternal]
+        PrivateIpAddress: 10.0.2.75
+    UserData:
+      Fn::Base64: !Sub |
+        <powershell>
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+        $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
+        New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1","8.8.8.8")
+        route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
+        </powershell>
+```
+
+Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
 
 ### 4.7. Implementación de VPN con WireGuard
 
@@ -551,14 +755,34 @@ scrape_configs:
 
 #### Reglas de Alerta
 
-Se han configurado las siguientes reglas de alerta en `/etc/prometheus/alert_rules.yml`:
+Se han configurado las siguientes reglas de alerta en `/etc/prometheus/alert_rules.yml`, organizadas en tres grupos:
 
-| Regla | Descripción | Umbral |
-|-------|-------------|--------|
-| `InstanceDown` | Servidor caído | 1 minuto sin respuesta |
-| `HighCPU` | Uso de CPU elevado | >80% durante 5 minutos |
-| `HighMemory` | Uso de memoria elevado | >85% durante 5 minutos |
-| `DiskSpaceLow` | Espacio de disco bajo | >85% de uso durante 5 minutos |
+**Alertas de servidor (Ubuntu Gateway - métricas `node_*`):**
+
+| Regla | Descripción | Umbral | Métrica |
+|-------|-------------|--------|---------|
+| `InstanceDown` | Servidor caído | 1 minuto sin respuesta | `up` |
+| `HighCPU` | Uso de CPU elevado en Ubuntu | >80% durante 5 minutos | `node_cpu_seconds_total` |
+| `HighMemory` | Uso de memoria elevado en Ubuntu | >85% durante 5 minutos | `node_memory_MemAvailable_bytes` |
+| `DiskSpaceLow` | Espacio de disco bajo en Ubuntu | >85% de uso durante 5 minutos | `node_filesystem_avail_bytes` |
+
+**Alertas de Windows Server (métricas `windows_*`):**
+
+| Regla | Descripción | Umbral | Métrica |
+|-------|-------------|--------|---------|
+| `HighCPUWindows` | Uso de CPU elevado en Windows | >90% durante 5 minutos | `windows_cpu_time_total` |
+| `HighMemoryWindows` | Uso de memoria elevado en Windows | >85% durante 5 minutos | `windows_os_physical_memory_free_bytes` |
+| `DiskSpaceLowWindows` | Espacio de disco bajo en Windows | >85% de uso durante 5 minutos | `windows_logical_disk_free_bytes` |
+
+> **Nota:** Las alertas de servidor Linux y Windows utilizan métricas diferentes porque cada sistema operativo es monitorizado por un exporter distinto (Node Exporter para Ubuntu, Windows Exporter para Windows Server). La regla `InstanceDown` aplica a ambos targets ya que utiliza la métrica genérica `up` de Prometheus.
+
+**Alertas de seguridad (Gateway Ubuntu):**
+
+| Regla | Descripción | Umbral | Métrica |
+|-------|-------------|--------|---------|
+| `PortScanDetected` | Posible escaneo de puertos detectado | >10 paquetes denegados/segundo durante 2 minutos | `iptables_dropped_packets_total` |
+
+> **Nota sobre detección de port scanning:** La alerta `PortScanDetected` se basa en una métrica custom (`iptables_dropped_packets_total`) generada por un script que lee los contadores de las reglas LOG de iptables. Para que funcione, es necesario configurar el textfile collector de Node Exporter y el script de métricas (véase la sección 4.15). Los paquetes denegados por los Security Groups de AWS no se registran en iptables, ya que se descartan a nivel de infraestructura antes de llegar a la instancia.
 
 #### Verificación de Targets
 
@@ -617,6 +841,12 @@ Se recomienda importar el dashboard **Node Exporter Full** (ID: 1860) desde Graf
 4. Importar
 
 Este dashboard proporciona una vista completa de las métricas del sistema Ubuntu.
+![Dashboard Node Exporter Full](imagenes/secciones-ubuntu.png)
+*Figura 2: Todas las secciones de Node Exporter Full.*
+
+
+![Dashboard Node Exporter Full](imagenes/panel-ubuntu.png)
+*Figura 3: Dashboard de métricas del servidor Ubuntu en Grafana.*
 
 #### Dashboard de Windows Server
 
@@ -714,6 +944,9 @@ windows_system_processor_queue_length{instance=~"$server"}
 | Gauge | Memoria, uso de disco |
 | Bar gauge | Uso de discos por partición, estado de servicios |
 | Time series | Tráfico de red, CPU histórica, memoria histórica, disco histórica, presión de procesador |
+
+![Dashboard Windows Server](imagenes/panel-windows-server.png)
+*Figura 3: Dashboard de métricas del servidor Windows en Grafana.*
 
 **Problemas detectados y corregidos:**
 
@@ -840,9 +1073,6 @@ curl http://localhost:9093/api/v2/status | python3 -m json.tool
 | Canal | Estado | Notas |
 |-------|--------|-------|
 | Telegram | ✓ Funcional | Configurado con bot token y Chat ID |
-| Discord | ⏳ Pendiente | Requiere servicio intermedio para formato JSON |
-
-**Discord:** La integración con Discord se deja pendiente para futuras implementaciones. Discord requiere un servicio intermedio que transforme el formato de alertas de Alertmanager al formato JSON esperado (`{"content": "mensaje"}`). Posibles soluciones incluyen crear un servicio web intermedio o utilizar herramientas como [Prometheus Discord Webhook](https://github.com/benjojo/alertmanager-discord).
 
 #### Archivos de Configuración
 
@@ -853,7 +1083,8 @@ Los archivos de configuración de ejemplo están disponibles en el directorio `c
 | `configs/prometheus.yml.example` | Configuración de Prometheus |
 | `configs/alert_rules.yml` | Reglas de alerta |
 | `configs/alertmanager.yml.example` | Configuración de Alertmanager |
-| `configs/prometheus-alertmanager.defaults` | Variables de entorno de Alertmanager |
+| `scripts/iptables-logging.sh` | Configuración de reglas LOG de iptables y logrotate |
+| `scripts/iptables-metrics.sh` | Métricas custom de iptables para Prometheus |
 
 ### 4.12. Incidencias durante la implantación
 
@@ -864,7 +1095,7 @@ Durante el despliegue de la infraestructura se encontraron y resolvieron diversa
 | Windows Exporter no accesible | Prometheus no podía conectar con el puerto 9182 del Windows Server | Añadir regla en Security Group de AWS para permitir tráfico desde el Gateway | Marzo |
 | Alertmanager no iniciaba | Error "permission denied" al crear directorio de datos | Crear directorio `/var/lib/prometheus/alertmanager` con permisos correctos | Marzo |
 | Alertmanager versión antigua | La versión 0.23.0 no soportaba `telegram_configs` | Actualizar a versión 0.28.1 manualmente | Marzo |
-| Discord no recibe alertas | Formato de mensaje incompatible con Discord webhook | Pendiente - requiere servicio intermedio para transformar JSON | Marzo |
+| Discord no disponible | El proyecto alertmanager-discord no tiene releases precompilados disponibles, por lo que la integración con Discord no se implementó | Documentado como mejora futura (telegram como canal principal) | Marzo |
 | Clientes VPN no conectan con AD | La subred VPN original (`10.0.3.0/24`) estaba dentro del CIDR de la VPC (`10.0.0.0/16`), impidiendo que AWS enrutara tráfico de respuesta hacia clientes VPN | Cambiar subred VPN a `172.16.3.0/24` (fuera del CIDR de la VPC), añadir ruta VPN en RouteTable privada, reglas iptables de forwarding y NAT VPN→subred privada | Abril |
 
 #### Lecciones aprendidas
@@ -1013,3 +1244,156 @@ sysmon64.exe -accepteula -i sysmonconfig.xml
 ```
 
 > **Nota:** Para que la instalación funcione correctamente, el fichero `sysmonconfig.xml` debe estar en la misma carpeta que `sysmon64.exe` o indicarse con ruta completa.
+
+### 4.15. Gestión de logs y detección de anomalías en el Gateway
+
+Para reforzar la trazabilidad del Gateway Ubuntu, se han implementado mecanismos de registro de tráfico denegado y detección de escaneo de puertos.
+
+#### Reglas LOG de iptables
+
+Se han configurado reglas de logging en iptables para registrar los paquetes que son descartados por el firewall del Gateway. Estos registros se almacenan en `/var/log/kern.log` con el prefijo `IPTables-Dropped`:
+
+```bash
+# Reglas LOG en chain INPUT
+sudo iptables -A INPUT -j LOG --log-prefix "IPTables-Dropped: " --log-level 4
+
+# Reglas LOG en chain FORWARD
+sudo iptables -A FORWARD -j LOG --log-prefix "IPTables-Dropped: " --log-level 4
+```
+
+Adicionalmente, se ha habilitado el registro de paquetes sospechosos (martians) en el kernel:
+
+```bash
+sudo sysctl -w net.ipv4.conf.all.log_martians=1
+sudo sysctl -w net.ipv4.conf.default.log_martians=1
+```
+
+> **Nota importante:** Los paquetes denegados por los Security Groups de AWS **no se registran en iptables**, ya que se descartan a nivel de infraestructura de AWS antes de llegar a la instancia. Las reglas LOG solo capturan tráfico que llega a la instancia y es descartado por iptables.
+
+#### Rotación de logs
+
+Se ha configurado `logrotate` para gestionar la rotación de los logs del kernel, evitando el consumo excesivo de disco:
+
+```
+# /etc/logrotate.d/kern-log
+/var/log/kern.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 syslog adm
+}
+```
+
+La configuración mantiene 7 días de logs comprimidos con rotación diaria.
+
+#### Métricas custom de iptables para Prometheus
+
+Se ha desarrollado un script (`scripts/iptables-metrics.sh`) que expone los contadores de paquetes denegados como métricas de Prometheus mediante el textfile collector de Node Exporter:
+
+```
+# HELP iptables_dropped_packets_total Total number of packets logged as dropped by iptables
+# TYPE iptables_dropped_packets_total counter
+iptables_dropped_packets_total{chain="INPUT"} <contador>
+iptables_dropped_packets_total{chain="FORWARD"} <contador>
+```
+
+El script lee los contadores directamente de `iptables -L -v -n` (no de los logs), lo que lo hace robusto frente a rotaciones de archivos de log.
+
+Para que las métricas custom estén disponibles en Prometheus, Node Exporter debe arrancar con el flag `--collector.textfile.directory`:
+
+```bash
+# Configurar en /etc/default/prometheus-node-exporter
+ARGS="--collector.textfile.directory=/var/lib/prometheus/node-exporter"
+```
+
+El script se ejecuta cada minuto mediante cron:
+
+```bash
+echo "* * * * * root /opt/iptables-metrics.sh" > /etc/cron.d/iptables-metrics
+```
+
+#### Configuración automatizada
+
+Se ha desarrollado el script `scripts/iptables-logging.sh` que configura de forma idempotente:
+
+1. Las reglas LOG de iptables en los chains INPUT y FORWARD
+2. El registro de paquetes sospechosos (martians) en sysctl
+3. La persistencia de las reglas con `netfilter-persistent`
+4. La rotación de logs con `logrotate`
+5. El directorio para el textfile collector de Node Exporter
+
+```bash
+# Ejecutar en el Gateway Ubuntu
+sudo ./scripts/iptables-logging.sh
+```
+
+#### Alerta de detección de escaneo de puertos
+
+La métrica `iptables_dropped_packets_total` alimenta la regla de alerta `PortScanDetected`, que se activa cuando el rate de paquetes denegados supera los 10 por segundo durante 2 minutos. Esto permite detectar posibles escaneos de puertos o ataques de fuerza bruta contra la infraestructura.
+
+### 4.16. Bootstrap del Gateway
+
+Una vez desplegada la infraestructura mediante CloudFormation y establecido el SSH al Ubuntu Gateway, se debe ejecutar el script `bootstrap.sh` para completar la configuración del servidor.
+
+#### Funcionamiento del script
+
+El script `scripts/bootstrap.sh` automatiza la configuración completa del Gateway Ubuntu en 11 pasos:
+
+| Paso | Descripción |
+|------|-------------|
+| 1 | Actualizar sistema (apt update + upgrade) |
+| 2 | Instalar software desde repositorios apt |
+| 3 | Instalar Alertmanager 0.28.1 desde release oficial |
+| 4 | Clonar repositorio del proyecto en `/home/ubuntu/despliegue` |
+| 5 | Copiar configs de monitorización desde el repositorio |
+| 6 | Solicitar token y Chat ID de Telegram (interactivo) |
+| 7 | Configurar reglas LOG de iptables |
+| 8 | Configurar métricas custom de iptables y textfile collector |
+| 9 | Configurar WireGuard (generación automática de claves) |
+| 10 | Habilitar e iniciar todos los servicios |
+| 11 | Verificar estado de los servicios |
+
+#### Ejecución
+
+```bash
+# Desde el Ubuntu Gateway, tras hacer SSH
+bash /home/ubuntu/despliegue/scripts/bootstrap.sh
+```
+
+El script solicita interactivamente:
+- **Token del bot de Telegram** — para configurar Alertmanager
+- **Chat ID del grupo** — para dirigir las notificaciones
+
+Estos valores nunca se almacenan en el repositorio, lo que mantiene las credenciales fuera del código.
+
+#### Requisitos previos
+
+- Acceso SSH al Ubuntu Gateway
+- Conexión a Internet desde el servidor (para clonar el repositorio e instalar paquetes)
+- Repo clonado en `/home/ubuntu/despliegue` (ya hecho por el UserData de CloudFormation)
+
+#### Verificación posterior
+
+Tras la ejecución, los servicios deben estar activos:
+
+```bash
+systemctl status prometheus prometheus-node-exporter grafana-server prometheus-alertmanager wg-quick@wg0
+```
+
+Puertos en escucha:
+- `9090` — Prometheus
+- `9100` — Node Exporter
+- `3000` — Grafana
+- `9093` — Alertmanager
+- `51820/UDP` — WireGuard
+
+#### Creación de clientes VPN
+
+Una vez bootstrapped el Gateway, se pueden crear clientes VPN con el script dedicado:
+
+```bash
+sudo /home/ubuntu/despliegue/scripts/crear-cliente-vpn.sh <nombre_cliente>
+```
