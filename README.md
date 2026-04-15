@@ -1,4 +1,4 @@
-
+<img width="1893" height="730" alt="image" src="https://github.com/user-attachments/assets/77c68e41-d518-4499-97da-614f7babbc66" />
 
 ## 1. Resumen de lo implementado
 
@@ -30,6 +30,8 @@ Componentes principales:
 - Restriccion por usuario/grupo autorizado.
 - Validaciones de entrada (UPN, OU, password policy, duplicados).
 - Auditoria en log JSONL.
+
+<img width="1893" height="730" alt="image" src="https://github.com/user-attachments/assets/beac6a57-f947-41f1-9fae-ab130b77d9eb" />
 
 5. Script de configuracion de API.
 - Script para desplegar/configurar la aplicacion /api en IIS.
