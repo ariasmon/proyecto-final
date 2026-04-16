@@ -32,6 +32,9 @@ Una vez adjuntado el disco:
 5. Asignar la letra **E:**.
 6. Poner la etiqueta **Backup**.
 
+<img width="941" height="91" alt="Creaccion disco duro " src="https://github.com/user-attachments/assets/1281f5dc-721a-4892-87e6-e4b172a3b8fe" />
+
+
 ## 3. Instalación de Windows Server Backup
 
 Para usar la consola de copias de seguridad y `wbadmin`, hay que instalar la característica **Windows Server Backup**.
@@ -62,6 +65,9 @@ Abrir una consola como administrador y ejecutar:
 wbadmin start systemstatebackup -backuptarget:E: -quiet
 ```
 
+<img width="702" height="301" alt="Creacciondelbackup" src="https://github.com/user-attachments/assets/0f7d7f18-b4bb-419f-8efb-cfb9f113f751" />
+
+
 ### 4.2. Qué incluye
 
 Este backup protege, entre otros elementos:
@@ -80,6 +86,9 @@ Para comprobar que las copias se están generando correctamente:
 ```cmd
 wbadmin get versions -backuptarget:E:
 ```
+
+<img width="437" height="116" alt="CopiasDisponiblesbackup" src="https://github.com/user-attachments/assets/3c845115-3ec1-42e5-abca-f38e998623d5" />
+
 
 Este comando muestra las versiones disponibles almacenadas en el volumen de backup.
 
@@ -111,6 +120,9 @@ schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -b
 - Hora: 03:00
 - Usuario: `SYSTEM`
 - Acción: ejecutar `wbadmin start systemstatebackup -backuptarget:E: -quiet`
+
+<img width="469" height="367" alt="CreaccionSemanalbackup" src="https://github.com/user-attachments/assets/4837afb5-600f-4f0f-8f6d-9629d6547c71" />
+
 
 ### 7.3. Configuración desde la interfaz gráfica
 
