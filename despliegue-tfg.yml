@@ -13,6 +13,11 @@ Parameters:
     Description: Windows Server 2022 (auto)
     Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
     Default: "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
+  SafeModePassword:
+    Description: Contrasena del modo seguro de Active Directory (DSRM)
+    Type: String
+    NoEcho: true
+    MinLength: 8
 
 Resources:
   VPC:
@@ -166,7 +171,8 @@ Resources:
           Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
           route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
-          powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1"
+          $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
+          powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
           </powershell>
 
   BackupVolume:

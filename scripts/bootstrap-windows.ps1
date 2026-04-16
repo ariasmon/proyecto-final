@@ -2,7 +2,7 @@
 param(
     [string]$DomainName = "tfg.vp",
     [string]$NetBIOSName = "TFG",
-    [SecureString]$SafeModePassword = (ConvertTo-SecureString "REDACTED" -AsPlainText -Force)
+    [SecureString]$SafeModePassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +35,13 @@ Write-Log "=============================================="
 # ESTADO 0: AD DS no instalado -> Primer arranque
 # ============================================================================
 if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
+
+    # Validar contraseña solo en primer arranque (necesaria para promocion a DC)
+    if (-not $SafeModePassword) {
+        Write-Host "ERROR: Debe proporcionar -SafeModePassword para la promocion a DC. Ejemplo:"
+        Write-Host "  .\bootstrap-windows.ps1 -SafeModePassword (ConvertTo-SecureString 'TuClave' -AsPlainText -Force)"
+        exit 1
+    }
 
     Write-Log "[ESTADO 0] Primer arranque - preparando sistema antes de promocion a DC"
 
