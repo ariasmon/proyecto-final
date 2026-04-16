@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Directorio de usuarios AD</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Segoe UI, Arial, sans-serif; background: #f5f7fa; color: #1a1a1a; }
+
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid #dde3ea;
+      padding: 1rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .title { font-size: 1.1rem; font-weight: 700; }
+    .subtitle { font-size: 0.9rem; color: #5d6773; margin-top: 3px; }
+
+    .badge {
+      border: 1px solid #d6e2f4;
+      background: #f3f8ff;
+      color: #1f5aa3;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .container { padding: 1.25rem 1.5rem 1.5rem; }
+
+    .toolbar {
+      background: #fff;
+      border: 1px solid #dde3ea;
+      border-radius: 12px;
+      padding: 0.9rem;
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 10px;
+      margin-bottom: 1rem;
+    }
+    .search {
+      width: 100%;
+      border: 1px solid #cfd7e3;
+      border-radius: 10px;
+      padding: 0.65rem 0.8rem;
+      font: inherit;
+      background: #fff;
+    }
+    .btn {
+      border: 1px solid #cfd7e3;
+      background: #fff;
+      border-radius: 10px;
+      padding: 0.65rem 0.9rem;
+      font: inherit;
+      cursor: pointer;
+    }
+    .btn:hover { background: #f8fbff; }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 0.9rem;
+    }
+
+    .select {
+      width: 100%;
+      border: 1px solid #cfd7e3;
+      border-radius: 10px;
+      padding: 0.62rem 0.7rem;
+      font: inherit;
+      background: #fff;
+      color: #202938;
+    }
+
+    .status {
+      margin-bottom: 0.85rem;
+      font-size: 0.88rem;
+      color: #4b5563;
+    }
+
+    .summary {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 0.85rem;
+    }
+
+    .chip {
+      background: #eef5ff;
+      color: #184b8f;
+      border: 1px solid #d7e6fb;
+      border-radius: 999px;
+      padding: 0.34rem 0.62rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid #dde3ea;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    thead th {
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      font-size: 0.8rem;
+      color: #526071;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0.7rem 0.75rem;
+    }
+
+    tbody td {
+      padding: 0.75rem;
+      border-bottom: 1px solid #eef2f7;
+      font-size: 0.88rem;
+      color: #202938;
+      vertical-align: top;
+    }
+
+    tbody tr:last-child td { border-bottom: none; }
+
+    .empty {
+      background: #fff;
+      border: 1px solid #e7e2c1;
+      color: #6b5a1e;
+      border-radius: 10px;
+      padding: 0.9rem;
+      margin-top: 0.9rem;
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    .actions {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .pagination {
+      margin-top: 0.95rem;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .page-info {
+      font-size: 0.84rem;
+      color: #4b5563;
+      margin-right: 8px;
+    }
+
+    .hint {
+      margin-top: 1rem;
+      font-size: 0.84rem;
+      color: #5f6b7a;
+      line-height: 1.5;
+      background: #fff;
+      border: 1px solid #dde3ea;
+      border-radius: 10px;
+      padding: 0.8rem;
+    }
+
+    @media (max-width: 860px) {
+      .toolbar { grid-template-columns: 1fr; }
+      .filters { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <div class="title">Directorio de usuarios del dominio</div>
+      <div class="subtitle">Listado cargado desde Active Directory (archivo ad-users.json)</div>
+    </div>
+    <div class="badge">Solo usuarios autenticados del dominio</div>
+  </div>
+
+  <div class="container">
+    <div class="toolbar">
+      <input id="searchInput" class="search" type="text" placeholder="Buscar por usuario, nombre, departamento o correo" />
+      <button class="btn" id="searchBtn" type="button">Buscar</button>
+      <button class="btn" id="reloadBtn" type="button">Recargar</button>
+      <button class="btn" id="exportBtn" type="button">Exportar CSV</button>
+      <a class="btn" href="index.html" style="text-decoration:none; color:#1a1a1a; display:inline-flex; align-items:center;">Volver al portal</a>
+    </div>
+
+    <div class="filters">
+      <select id="departmentFilter" class="select">
+        <option value="">Todos los departamentos</option>
+      </select>
+      <select id="statusFilter" class="select">
+        <option value="">Todos los estados</option>
+        <option value="activo">Activos</option>
+        <option value="deshabilitado">Deshabilitados</option>
+      </select>
+      <select id="sortFilter" class="select">
+        <option value="display_asc">Orden: Nombre A-Z</option>
+        <option value="display_desc">Orden: Nombre Z-A</option>
+        <option value="user_asc">Orden: Usuario A-Z</option>
+        <option value="user_desc">Orden: Usuario Z-A</option>
+      </select>
+      <select id="pageSizeFilter" class="select">
+        <option value="10">10 por pagina</option>
+        <option value="25" selected>25 por pagina</option>
+        <option value="50">50 por pagina</option>
+        <option value="100">100 por pagina</option>
+      </select>
+    </div>
+
+    <div id="status" class="status">Cargando usuarios...</div>
+
+    <div class="summary">
+      <span id="totalChip" class="chip">Total: 0</span>
+      <span id="filteredChip" class="chip">Mostrando: 0</span>
+      <span id="syncChip" class="chip">Ultima sincronizacion: --</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Usuario</th>
+          <th>Nombre</th>
+          <th>Correo</th>
+          <th>Departamento</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody id="usersTableBody"></tbody>
+    </table>
+
+    <div class="pagination">
+      <span id="pageInfo" class="page-info">Pagina 1 de 1</span>
+      <button class="btn" id="prevBtn" type="button">Anterior</button>
+      <button class="btn" id="nextBtn" type="button">Siguiente</button>
+    </div>
+
+    <div id="empty" class="empty">No hay usuarios para mostrar. Ejecuta el script scripts/exportar-usuarios-ad.ps1 en el servidor para generar ad-users.json.</div>
+
+    <div class="actions">
+      <button class="btn" type="button" disabled>Crear usuario (solo Administrator)</button>
+      <button class="btn" type="button" disabled>Modificar grupos (solo Administrator)</button>
+      <button class="btn" type="button" disabled>Deshabilitar cuenta (solo Administrator)</button>
+    </div>
+
+    <div class="hint">
+      Esta pagina no consulta AD directamente desde el navegador por seguridad.
+      IIS debe servir el archivo ad-users.json generado en el servidor con permisos de Active Directory.
+    </div>
+  </div>
+
+  <script>
+    const usersTableBody = document.getElementById('usersTableBody');
+    const statusEl = document.getElementById('status');
+    const emptyEl = document.getElementById('empty');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const reloadBtn = document.getElementById('reloadBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const departmentFilter = document.getElementById('departmentFilter');
+    const statusFilter = document.getElementById('statusFilter');
+    const sortFilter = document.getElementById('sortFilter');
+    const pageSizeFilter = document.getElementById('pageSizeFilter');
+    const totalChip = document.getElementById('totalChip');
+    const filteredChip = document.getElementById('filteredChip');
+    const syncChip = document.getElementById('syncChip');
+    const pageInfo = document.getElementById('pageInfo');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+
+    let allUsers = [];
+    let filteredUsers = [];
+    let currentPage = 1;
+
+    function normalize(text) {
+      return (text || '').toString().toLowerCase();
+    }
+
+    function toStatus(user) {
+      return (user.Enabled === true || user.Enabled === 'true') ? 'activo' : 'deshabilitado';
+    }
+
+    function formatSyncDate(raw) {
+      const d = new Date(raw);
+      if (!raw || Number.isNaN(d.getTime())) {
+        return '--';
+      }
+      return d.toLocaleString('es-ES');
+    }
+
+    function escapeCsv(value) {
+      const v = (value || '').toString();
+      if (v.includes(',') || v.includes('"') || v.includes('\n')) {
+        return '"' + v.replace(/"/g, '""') + '"';
+      }
+      return v;
+    }
+
+    function renderRows(users) {
+      usersTableBody.innerHTML = '';
+
+      if (!users.length) {
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      const rows = users.map((u) => {
+        const enabled = toStatus(u) === 'activo' ? 'Activo' : 'Deshabilitado';
+        return '<tr>' +
+          '<td>' + (u.SamAccountName || '-') + '</td>' +
+          '<td>' + (u.DisplayName || u.Name || '-') + '</td>' +
+          '<td>' + (u.Mail || u.EmailAddress || '-') + '</td>' +
+          '<td>' + (u.Department || '-') + '</td>' +
+          '<td>' + enabled + '</td>' +
+        '</tr>';
+      }).join('');
+
+      usersTableBody.innerHTML = rows;
+    }
+
+    function fillDepartmentFilter(users) {
+      const departments = Array.from(new Set(users.map((u) => (u.Department || '').trim()).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b, 'es'));
+
+      const current = departmentFilter.value;
+      departmentFilter.innerHTML = '<option value="">Todos los departamentos</option>';
+      departments.forEach((dep) => {
+        const opt = document.createElement('option');
+        opt.value = dep;
+        opt.textContent = dep;
+        departmentFilter.appendChild(opt);
+      });
+      departmentFilter.value = departments.includes(current) ? current : '';
+    }
+
+    function sortUsers(users) {
+      const mode = sortFilter.value;
+      const sorted = [...users];
+
+      sorted.sort((a, b) => {
+        const da = normalize(a.DisplayName || a.Name);
+        const db = normalize(b.DisplayName || b.Name);
+        const ua = normalize(a.SamAccountName);
+        const ub = normalize(b.SamAccountName);
+
+        if (mode === 'display_desc') return db.localeCompare(da, 'es');
+        if (mode === 'user_asc') return ua.localeCompare(ub, 'es');
+        if (mode === 'user_desc') return ub.localeCompare(ua, 'es');
+        return da.localeCompare(db, 'es');
+      });
+
+      return sorted;
+    }
+
+    function paginate(users) {
+      const pageSize = parseInt(pageSizeFilter.value, 10) || 25;
+      const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      const start = (currentPage - 1) * pageSize;
+      const pageUsers = users.slice(start, start + pageSize);
+
+      pageInfo.textContent = 'Pagina ' + currentPage + ' de ' + totalPages;
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = currentPage >= totalPages;
+      return pageUsers;
+    }
+
+    function refreshSummary() {
+      totalChip.textContent = 'Total: ' + allUsers.length;
+      filteredChip.textContent = 'Mostrando: ' + filteredUsers.length;
+    }
+
+    function runQuery(resetPage) {
+      if (resetPage) {
+        currentPage = 1;
+      }
+
+      const q = normalize(searchInput.value);
+      const dep = departmentFilter.value;
+      const st = statusFilter.value;
+
+      let result = allUsers.filter((u) => {
+        const values = [u.SamAccountName, u.DisplayName, u.Name, u.Department, u.Mail, u.EmailAddress];
+        const textMatches = !q || values.some((v) => normalize(v).includes(q));
+        const depMatches = !dep || (u.Department || '') === dep;
+        const stMatches = !st || toStatus(u) === st;
+        return textMatches && depMatches && stMatches;
+      });
+
+      result = sortUsers(result);
+      filteredUsers = result;
+      const pageUsers = paginate(filteredUsers);
+      renderRows(pageUsers);
+      refreshSummary();
+      statusEl.textContent = 'Mostrando ' + filteredUsers.length + ' de ' + allUsers.length + ' usuarios';
+    }
+
+    function downloadCsv() {
+      const header = ['SamAccountName', 'DisplayName', 'Mail', 'Department', 'Estado'];
+      const body = filteredUsers.map((u) => [
+        u.SamAccountName || '',
+        u.DisplayName || u.Name || '',
+        u.Mail || u.EmailAddress || '',
+        u.Department || '',
+        toStatus(u) === 'activo' ? 'Activo' : 'Deshabilitado'
+      ]);
+
+      const csv = [header, ...body].map((row) => row.map(escapeCsv).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+      a.href = url;
+      a.download = 'usuarios-ad-' + ts + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    async function loadUsers() {
+      try {
+        statusEl.textContent = 'Cargando usuarios...';
+        emptyEl.style.display = 'none';
+
+        const response = await fetch('ad-users.json?ts=' + Date.now(), { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error('No se pudo leer ad-users.json');
+        }
+
+        const data = await response.json();
+        allUsers = Array.isArray(data) ? data : [];
+        fillDepartmentFilter(allUsers);
+        runQuery(true);
+        syncChip.textContent = 'Ultima sincronizacion: ' + formatSyncDate(response.headers.get('last-modified'));
+        statusEl.textContent = 'Usuarios cargados correctamente';
+      } catch (error) {
+        allUsers = [];
+        filteredUsers = [];
+        usersTableBody.innerHTML = '';
+        emptyEl.style.display = 'block';
+        statusEl.textContent = 'No se pudo cargar el directorio. Revisa ad-users.json en IIS.';
+        totalChip.textContent = 'Total: 0';
+        filteredChip.textContent = 'Mostrando: 0';
+        pageInfo.textContent = 'Pagina 1 de 1';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+      }
+    }
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        runQuery(true);
+      }
+    });
+    searchBtn.addEventListener('click', () => runQuery(true));
+    departmentFilter.addEventListener('change', () => runQuery(true));
+    statusFilter.addEventListener('change', () => runQuery(true));
+    sortFilter.addEventListener('change', () => runQuery(true));
+    pageSizeFilter.addEventListener('change', () => runQuery(true));
+    prevBtn.addEventListener('click', () => {
+      currentPage -= 1;
+      runQuery(false);
+    });
+    nextBtn.addEventListener('click', () => {
+      currentPage += 1;
+      runQuery(false);
+    });
+    exportBtn.addEventListener('click', downloadCsv);
+    reloadBtn.addEventListener('click', loadUsers);
+    loadUsers();
+  </script>
+</body>
+</html>
