@@ -31,21 +31,31 @@ fi
 # ============================================================================
 # PASO 1: Actualizar sistema
 # ============================================================================
-echo "[1/11] Actualizando sistema..."
+echo "[1/12] Actualizando sistema..."
 apt-get update -y
 apt-get upgrade -y
 
 # ============================================================================
-# PASO 2: Instalar software desde repositorios apt
+# PASO 2: Añadir repositorio oficial de Grafana
 # ============================================================================
-echo "[2/11] Instalando software base..."
+echo "[2/12] Configurando repositorio de Grafana..."
+apt-get install -y apt-transport-https software-properties-common wget
+wget -q -O /usr/share/keyrings/grafana.key https://apt.grafana.com/gpg.key
+echo "deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main" \
+  | tee /etc/apt/sources.list.d/grafana.list
+apt-get update -y
+
+# ============================================================================
+# PASO 3: Instalar software desde repositorios apt
+# ============================================================================
+echo "[3/12] Instalando software base..."
 apt-get install -y prometheus prometheus-node-exporter grafana wireguard \
   iptables-persistent netfilter-persistent curl python3 jq
 
 # ============================================================================
-# PASO 3: Instalar Alertmanager 0.28.1 desde release
+# PASO 4: Instalar Alertmanager 0.28.1 desde release
 # ============================================================================
-echo "[3/11] Instalando Alertmanager 0.28.1..."
+echo "[4/12] Instalando Alertmanager 0.28.1..."
 cd /tmp
 wget -q https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
 tar xzf alertmanager-0.28.1.linux-amd64.tar.gz
@@ -56,9 +66,9 @@ mkdir -p /var/lib/prometheus/alertmanager
 chown -R prometheus:prometheus /var/lib/prometheus/alertmanager
 
 # ============================================================================
-# PASO 4: Clonar repositorio
+# PASO 5: Clonar repositorio
 # ============================================================================
-echo "[4/11] Clonando repositorio..."
+echo "[5/12] Clonando repositorio..."
 if [ -d "$DEPLOY_DIR" ]; then
     echo "Repositorio ya existe, actualizando..."
     git -C "$DEPLOY_DIR" pull origin main
@@ -67,18 +77,18 @@ else
 fi
 
 # ============================================================================
-# PASO 5: Copiar configs
+# PASO 6: Copiar configs
 # ============================================================================
-echo "[5/11] Copiando configs..."
+echo "[6/12] Copiando configs..."
 cp "$DEPLOY_DIR"/configs/prometheus.yml /etc/prometheus/
 cp "$DEPLOY_DIR"/configs/alert_rules.yml /etc/prometheus/
 cp "$DEPLOY_DIR"/configs/alertmanager.yml.example /etc/prometheus/alertmanager.yml
 chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 
 # ============================================================================
-# PASO 6: Preguntar tokens Telegram (interactivo)
+# PASO 7: Preguntar tokens Telegram (interactivo)
 # ============================================================================
-echo "[6/11] Configuracion de Telegram..."
+echo "[7/12] Configuracion de Telegram..."
 echo ""
 echo "=============================================="
 echo "Configuracion de Alertmanager - Telegram"
@@ -95,17 +105,17 @@ sed -i "s/TU_CHAT_ID_AQUI/$CHAT_ID/" /etc/prometheus/alertmanager.yml
 echo "Tokens aplicados correctamente."
 
 # ============================================================================
-# PASO 7: Configurar iptables-logging
+# PASO 8: Configurar iptables-logging
 # ============================================================================
-echo "[7/11] Configurando logging de iptables..."
+echo "[8/12] Configurando logging de iptables..."
 cp "$DEPLOY_DIR"/scripts/iptables-logging.sh /opt/
 chmod +x /opt/iptables-logging.sh
 bash /opt/iptables-logging.sh
 
 # ============================================================================
-# PASO 8: Configurar iptables-metrics y Node Exporter textfile
+# PASO 9: Configurar iptables-metrics y Node Exporter textfile
 # ============================================================================
-echo "[8/11] Configurando metricas de iptables..."
+echo "[9/12] Configurando metricas de iptables..."
 cp "$DEPLOY_DIR"/scripts/iptables-metrics.sh /opt/
 chmod +x /opt/iptables-metrics.sh
 
@@ -120,9 +130,9 @@ echo "* * * * * root /opt/iptables-metrics.sh" > /etc/cron.d/iptables-metrics
 systemctl restart prometheus-node-exporter
 
 # ============================================================================
-# PASO 9: Configurar WireGuard
+# PASO 10: Configurar WireGuard
 # ============================================================================
-echo "[9/11] Configurando WireGuard..."
+echo "[10/12] Configurando WireGuard..."
 
 if [ ! -f /etc/wireguard/wg0.conf ]; then
     echo "Generando claves WireGuard..."
@@ -152,9 +162,9 @@ if ! iptables -t nat -C POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERAD
 fi
 
 # ============================================================================
-# PASO 10: Habilitar e iniciar servicios
+# PASO 11: Habilitar e iniciar servicios
 # ============================================================================
-echo "[10/11] Habilitando servicios..."
+echo "[11/12] Habilitando servicios..."
 
 systemctl enable prometheus prometheus-node-exporter grafana-server \
   prometheus-alertmanager wg-quick@wg0
@@ -168,9 +178,9 @@ systemctl enable --now wg-quick@wg0 2>/dev/null || systemctl start wg-quick@wg0
 echo "Servicios habilitados."
 
 # ============================================================================
-# PASO 11: Verificacion
+# PASO 12: Verificacion
 # ============================================================================
-echo "[11/11] Verificando servicios..."
+echo "[12/12] Verificando servicios..."
 echo ""
 echo "=============================================="
 echo "Estado de servicios"

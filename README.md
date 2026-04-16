@@ -1396,21 +1396,22 @@ Una vez desplegada la infraestructura mediante CloudFormation y establecido el S
 
 #### Funcionamiento del script
 
-El script `scripts/bootstrap.sh` automatiza la configuración completa del Gateway Ubuntu en 11 pasos:
+El script `scripts/bootstrap.sh` automatiza la configuración completa del Gateway Ubuntu en 12 pasos:
 
 | Paso | Descripción |
 |------|-------------|
 | 1 | Actualizar sistema (apt update + upgrade) |
-| 2 | Instalar software desde repositorios apt |
-| 3 | Instalar Alertmanager 0.28.1 desde release oficial |
-| 4 | Clonar repositorio del proyecto en `/home/ubuntu/despliegue` |
-| 5 | Copiar configs de monitorización desde el repositorio |
-| 6 | Solicitar token y Chat ID de Telegram (interactivo) |
-| 7 | Configurar reglas LOG de iptables |
-| 8 | Configurar métricas custom de iptables y textfile collector |
-| 9 | Configurar WireGuard (generación automática de claves) |
-| 10 | Habilitar e iniciar todos los servicios |
-| 11 | Verificar estado de los servicios |
+| 2 | Añadir repositorio oficial de Grafana |
+| 3 | Instalar software desde repositorios apt |
+| 4 | Instalar Alertmanager 0.28.1 desde release oficial |
+| 5 | Clonar repositorio del proyecto en `/home/ubuntu/despliegue` |
+| 6 | Copiar configs de monitorización desde el repositorio |
+| 7 | Solicitar token y Chat ID de Telegram (interactivo) |
+| 8 | Configurar reglas LOG de iptables |
+| 9 | Configurar métricas custom de iptables y textfile collector |
+| 10 | Configurar WireGuard (generación automática de claves) |
+| 11 | Habilitar e iniciar todos los servicios |
+| 12 | Verificar estado de los servicios |
 
 #### Ejecución
 
@@ -1576,12 +1577,12 @@ El script realiza las siguientes acciones:
 | `directorio-usuarios.html` | `C:\inetpub\wwwroot\misitio\` | Directorio de usuarios |
 | `ad-users.json` | `C:\inetpub\wwwroot\misitio\` | Datos de usuarios exportados |
 | `scripts/exportar-usuarios-ad.ps1` | Repositorio | Script de exportación |
-| `scripts/ad-user-service.ps1` | Repositorio | Lógica de validación y creación de usuarios |
+| `scripts/ad-user-service.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Lógica de validación y creación de usuarios (desplegado por configurar-api-alta-ad.ps1) |
 | `scripts/configurar-api-alta-ad.ps1` | Repositorio | Configuración IIS de la API |
 | `scripts/create-user.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint de alta de usuario |
 | `scripts/web.config` | `C:\inetpub\wwwroot\misitio\api\` | Configuración IIS del endpoint |
 
-![Portal web IIS](imagenes/Imagen-PaginaWebISS.png)
+![Portal web IIS](imagenes/Imagen-PaginaWebIIS.png)
 *Figura 4: Portal web interno desplegado en IIS sobre el Windows Server.*
 
 ### 4.18. Copia de seguridad de Active Directory

@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot\..\scripts\ad-user-service.ps1"
+. "$PSScriptRoot\ad-user-service.ps1"
 
 $allowedUsers = @('TFG\Administrator')
 $allowedGroups = @('TFG\GG-Portal-AD-Admins')

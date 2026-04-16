@@ -38,5 +38,12 @@ if (-not (Test-Path $AuditLogPath)) {
 icacls (Split-Path $AuditLogPath -Parent) /grant "IIS_IUSRS:(OI)(CI)M" | Out-Null
 icacls (Split-Path $AuditLogPath -Parent) /grant "IUSR:(OI)(CI)M" | Out-Null
 
+$serviceScript = Join-Path $PSScriptRoot 'ad-user-service.ps1'
+if (-not (Test-Path $serviceScript)) {
+    throw "No se encontro '$serviceScript'. Asegurate de que ad-user-service.ps1 esta en el mismo directorio que configurar-api-alta-ad.ps1."
+}
+Copy-Item -Path $serviceScript -Destination $ApiPhysicalPath -Force
+Write-Host "ad-user-service.ps1 copiado a $ApiPhysicalPath"
+
 Write-Host 'Configuracion completada.'
 Write-Host 'Endpoint disponible en: /api/create-user.ps1 (solo POST y usuarios autorizados).'

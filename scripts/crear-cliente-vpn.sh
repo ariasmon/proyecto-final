@@ -62,6 +62,14 @@ CLIENT_PRIVATE_KEY=$(wg genkey)
 CLIENT_PUBLIC_KEY=$(echo "$CLIENT_PRIVATE_KEY" | wg pubkey)
 wg set "$WG_INTERFACE" peer "$CLIENT_PUBLIC_KEY" allowed-ips "${CLIENT_ADDRESS}/32"
 
+# Persistir el peer en wg0.conf para que se conserve tras reinicios
+{
+  echo ""
+  echo "[Peer]"
+  echo "PublicKey = ${CLIENT_PUBLIC_KEY}"
+  echo "AllowedIPs = ${CLIENT_ADDRESS}/32"
+} >> "${WIREGUARD_DIR}/${WG_INTERFACE}.conf"
+
 # Generar archivo de configuracion del cliente
 CONFIG_FILE="${CLIENTS_DIR}/${CLIENTE}.conf"
 
