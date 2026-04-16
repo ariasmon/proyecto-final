@@ -18,7 +18,7 @@ echo ""
 # ============================================================================
 if systemctl is-active --quiet prometheus 2>/dev/null; then
     echo "El Gateway ya parece estar configurado (Prometheus esta activo)."
-    echo "Ejecutar bootstrap de nuevo sobrescribira configs y preguntara tokens."
+    echo "Ejecutar bootstrap de nuevo sobrescribira configs, tokens y provisioning de Grafana."
     echo -n "¿Continuar de todas formas? [N/y]: "
     read -r confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
@@ -193,9 +193,30 @@ systemctl enable --now wg-quick@wg0 2>/dev/null || systemctl start wg-quick@wg0
 echo "Servicios habilitados."
 
 # ============================================================================
-# PASO 12: Verificacion
+# PASO 12: Provisioning automatico de Grafana
 # ============================================================================
-echo "[12/12] Verificando servicios..."
+echo "[12/12] Configurando Grafana con provisioning automatico..."
+
+mkdir -p /etc/grafana/provisioning/datasources
+mkdir -p /etc/grafana/provisioning/dashboards
+mkdir -p /var/lib/grafana/dashboards
+
+cp "$DEPLOY_DIR"/configs/grafana-datasource.yml /etc/grafana/provisioning/datasources/prometheus.yml
+cp "$DEPLOY_DIR"/configs/grafana-dashboards.yml /etc/grafana/provisioning/dashboards/dashboards.yml
+cp "$DEPLOY_DIR"/configs/dashboard-node-exporter-full.json /etc/grafana/provisioning/dashboards/
+cp "$DEPLOY_DIR"/configs/dashboard-WindowsServer-personal.json /etc/grafana/provisioning/dashboards/
+
+chown -R grafana:grafana /etc/grafana/provisioning
+chown -R grafana:grafana /var/lib/grafana/dashboards
+
+echo "Provisioning de Grafana configurado."
+
+systemctl restart grafana-server
+
+# ============================================================================
+# PASO 13: Verificacion
+# ============================================================================
+echo "[13/13] Verificando servicios..."
 echo ""
 echo "=============================================="
 echo "Estado de servicios"
@@ -227,4 +248,5 @@ echo "  - Acceder a Grafana: http://<IP_GATEWAY>:3000"
 echo "  - Acceder a Prometheus: http://<IP_GATEWAY>:9090"
 echo "  - Ver clientes VPN: sudo wg show"
 echo "  - Para crear cliente VPN: sudo $DEPLOY_DIR/scripts/crear-cliente-vpn.sh <nombre>"
+echo "  - Dashboards ya disponibles en Grafana (Node Exporter Full y Windows Server)"
 echo ""

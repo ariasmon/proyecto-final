@@ -897,12 +897,74 @@ Se recomienda importar el dashboard **Node Exporter Full** (ID: 1860) desde Graf
 4. Importar
 
 Este dashboard proporciona una vista completa de las métricas del sistema Ubuntu.
-![Dashboard Node Exporter Full](imagenes/secciones-ubuntu.png)
-*Figura 2: Todas las secciones de Node Exporter Full.*
 
+#### Provisioning Automático de Grafana
 
-![Dashboard Node Exporter Full](imagenes/panel-ubuntu.png)
-*Figura 3: Dashboard de métricas del servidor Ubuntu en Grafana.*
+Grafana se configura automáticamente mediante ** provisioning**, lo que permite pre-configurar datasources y dashboards sin necesidad de intervención manual a través de la interfaz web.
+
+El script `bootstrap.sh` copia los archivos de provisioning a las carpetas de configuración de Grafana y reinicia el servicio para aplicar los cambios.
+
+##### Datasource Prometheus
+
+El datasource Prometheus se configura automáticamente con las siguientes características:
+
+| Parámetro | Valor |
+|-----------|-------|
+| **Nombre** | Prometheus |
+| **Tipo** | prometheus |
+| **UID** | `dfgvlrdp2vx8gd` |
+| **URL** | `http://localhost:9090` |
+| **Archivo** | `/etc/grafana/provisioning/datasources/prometheus.yml` |
+
+El UID `dfgvlrdp2vx8gd` se utiliza para mantener compatibilidad con el dashboard personalizado de Windows Server.
+
+##### Dashboards Precargados
+
+| Dashboard | Archivo | Descripción |
+|-----------|---------|-------------|
+| Node Exporter Full | `dashboard-node-exporter-full.json` | Dashboard completo para monitorización de Ubuntu (basado en ID: 1860) |
+| Windows Server Personal | `dashboard-WindowsServer-personal.json` | Dashboard adaptado para métricas de Windows Exporter |
+
+##### Archivos de Configuración
+
+| Archivo | Ubicación en repo | Ubicación en servidor |
+|---------|-------------------|----------------------|
+| `grafana-datasource.yml` | `configs/` | `/etc/grafana/provisioning/datasources/prometheus.yml` |
+| `grafana-dashboards.yml` | `configs/` | `/etc/grafana/provisioning/dashboards/dashboards.yml` |
+| `dashboard-node-exporter-full.json` | `configs/` | `/etc/grafana/provisioning/dashboards/` |
+| `dashboard-WindowsServer-personal.json` | `configs/` | `/etc/grafana/provisioning/dashboards/` |
+
+##### Funcionamiento
+
+El provisioning de Grafana funciona de la siguiente manera:
+
+1. **Grafana detecta automáticamente** los archivos en `/etc/grafana/provisioning/datasources/` y `/etc/grafana/provisioning/dashboards/`
+2. **Aplica la configuración** en el próximo reinicio del servicio o tras recargar la configuración
+3. **Los dashboards están disponibles inmediatamente** sin necesidad de importarlos manualmente
+
+El script `bootstrap.sh` ejecuta los siguientes pasos para configurar el provisioning:
+
+```bash
+mkdir -p /etc/grafana/provisioning/datasources
+mkdir -p /etc/grafana/provisioning/dashboards
+mkdir -p /var/lib/grafana/dashboards
+
+cp "$DEPLOY_DIR"/configs/grafana-datasource.yml /etc/grafana/provisioning/datasources/prometheus.yml
+cp "$DEPLOY_DIR"/configs/grafana-dashboards.yml /etc/grafana/provisioning/dashboards/dashboards.yml
+cp "$DEPLOY_DIR"/configs/dashboard-node-exporter-full.json /etc/grafana/provisioning/dashboards/
+cp "$DEPLOY_DIR"/configs/dashboard-WindowsServer-personal.json /etc/grafana/provisioning/dashboards/
+
+chown -R grafana:grafana /etc/grafana/provisioning
+chown -R grafana:grafana /var/lib/grafana/dashboards
+
+systemctl restart grafana-server
+```
+
+Tras ejecutar el bootstrap, Grafana ya tiene:
+- ✅ Datasource Prometheus configurado automáticamente
+- ✅ Dashboard Node Exporter Full disponible
+- ✅ Dashboard Windows Server personalizado disponible
+- ✅ Sin necesidad de configuración manual a través de la interfaz web
 
 #### Dashboard de Windows Server
 
@@ -1411,7 +1473,8 @@ El script `scripts/bootstrap.sh` automatiza la configuración completa del Gatew
 | 9 | Configurar métricas custom de iptables y textfile collector |
 | 10 | Configurar WireGuard (generación automática de claves) |
 | 11 | Habilitar e iniciar todos los servicios |
-| 12 | Verificar estado de los servicios |
+| 12 | Configurar provisioning automático de Grafana (datasource y dashboards) |
+| 13 | Verificar estado de los servicios |
 
 #### Ejecución
 
@@ -1446,6 +1509,13 @@ Puertos en escucha:
 - `3000` — Grafana
 - `9093` — Alertmanager
 - `51820/UDP` — WireGuard
+
+Grafana ya tiene pre-configurado:
+- Datasource Prometheus (UID: `dfgvlrdp2vx8gd`)
+- Dashboard Node Exporter Full
+- Dashboard Windows Server personalizado
+
+Accede a `http://<IP_GATEWAY>:3000` y navega a **Dashboards** para ver los disponibles.
 
 #### Creación de clientes VPN
 
