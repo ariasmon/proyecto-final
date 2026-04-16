@@ -168,25 +168,13 @@ Resources:
           <powershell>
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
           $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
-          $oldIp = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 | Select-Object -First 1
-          if ($oldIp) { Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress $oldIp.IPAddress -DefaultGateway $oldIp.DefaultGateway -Confirm:$false -ErrorAction SilentlyContinue }
-          Remove-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
-          New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
-          Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1","8.8.8.8")
+          $ifIndex = $adapter.ifIndex
+          Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
+          New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
+          Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
           route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
-
-          Invoke-WebRequest -Uri "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi" -OutFile "C:\windows_exporter.msi"
-          msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn
-          New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
-
-          Initialize-Disk -Number 1 -PartitionStyle MBR -PassThru |
-            New-Partition -UseMaximumSize -DriveLetter E |
-            Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force
-
-          Install-WindowsFeature Windows-Server-Backup -IncludeManagementTools
-          Install-WindowsFeature Web-WebServer,Web-Windows-Auth,Web-CGI
-
-          schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM 2>$null
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
+          powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1"
           </powershell>
 
   BackupVolume:
