@@ -119,6 +119,62 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
 *Figura 1: Topología de red en AWS con segmentación de subredes.*
+
+### 3.4. Análisis de puntos únicos de fallo (SPOF)
+
+Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente del sistema cuya caída provoca la interrupción total del servicio que presta. En la arquitectura desplegada, la restricción de recursos a dos instancias (Gateway Ubuntu + Windows Server) genera inherentemente varios SPOF que deben ser identificados y mitigados en la medida de lo posible.
+
+#### Identificación de puntos únicos de fallo
+
+| Componente | Rol en la arquitectura | SPOF | Impacto si falla |
+|------------|----------------------|------|-------------------|
+| Gateway Ubuntu | NAT, VPN, Port Forwarding, stack de monitorización | Sí | Subred privada sin salida a Internet, VPN caída, sin dashboards ni alertas |
+| Windows Server (DC) | Controlador de dominio único, DNS integrado, GPOs | Sí | Sin autenticación, sin resolución DNS, políticas no aplicadas |
+| Stack de monitorización | Prometheus + Grafana + Alertmanager (en el Gateway) | Sí | Pérdida total de visibilidad del estado de la infraestructura y de notificaciones |
+
+#### Análisis por componente
+
+##### Gateway Ubuntu
+
+El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7), punto de Port Forwarding para RDP y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
+
+**Mitigaciones adoptadas:**
+
+- **Auto-provisionamiento vía CloudFormation:** El UserData del template (`despliegue-tfg.yml`) permite recrear la instancia con toda su configuración base sin intervención manual.
+- **Detección temprana:** La regla de alerta `InstanceDown` (sección 4.9) detecta la caída del Gateway en un plazo de 1 minuto, notificando vía Telegram.
+- **Persistencia de configuración:** Las reglas de iptables se persisten mediante `iptables-persistent`, y el script `bootstrap.sh` (sección 4.16) automatiza la reconstrucción completa del servidor.
+- **Datos de monitorización en disco local:** Prometheus almacena las métricas en disco, por lo que un reinicio del Gateway no implica pérdida de datos históricos.
+
+**En un entorno productivo:** Se desplegaría un segundo Gateway en alta disponibilidad (VRRP/keepalived o NAT Gateway gestionado de AWS) y se realizarían snapshots periódicos de AMI para recuperación rápida.
+
+##### Windows Server (Controlador de dominio)
+
+El Windows Server opera como controlador de dominio único para `tfg.vp`, incluyendo el servicio DNS integrado. Al no existir una réplica del DC, su caída implica la imposibilidad de autenticar usuarios, resolver nombres del dominio y aplicar políticas de grupo (GPOs).
+
+**Mitigaciones adoptadas:**
+
+- **Detección temprana:** Las reglas `InstanceDown`, `HighCPUWindows` y `HighMemoryWindows` (sección 4.9) proporcionan visibilidad sobre el estado del servidor Windows antes de que un fallo se agrave.
+- **Windows Exporter:** Expone métricas de salud del sistema (CPU, memoria, disco, servicios) que permiten anticipar degradaciones.
+- **Contraseña DSRM:** Configurada durante la promoción del DC (sección 4.4), permite acceder en modo de restauración de Directory Services para tareas de recuperación.
+
+**En un entorno productivo:** Se desplegaría un segundo controlador de dominio para proporcionar redundancia de autenticación y DNS, y se automatizarían copias de seguridad del System State mediante `wbadmin` (véase la sección de Backup AD).
+
+##### Stack de monitorización
+
+Prometheus, Grafana y Alertmanager se ejecutan exclusivamente en el Gateway Ubuntu. Si el Gateway cae, la monitorización se pierde con él, lo que impide tanto la observación del estado como la recepción de alertas.
+
+**Mitigaciones adoptadas:**
+
+- **Auto-monitorización:** Prometheus se scrapea a sí mismo como target, lo que permite detectar anomalías en el propio proceso de recolección de métricas.
+- **Persistencia de datos:** Las métricas se almacenan en disco local en el Gateway, por lo que un reinicio del servicio no implica pérdida de histórico.
+- **Notificación de caída del Gateway:** Aunque la alerta `InstanceDown` notifica vía Telegram cuando el Gateway cae, la limitación evidente es que dicha notificación depende de que Alertmanager (que corre en el propio Gateway) esté operativo. En la práctica, la alerta solo es útil cuando el Gateway se recupera o cuando se monitoriza externamente.
+
+**En un entorno productivo:** El stack de monitorización se desplegaría en un servidor dedicado independiente del Gateway, con almacenamiento remoto (Thanos/S3) para garantizar la persistencia y disponibilidad de las métricas ante fallos del nodo de borde.
+
+#### Evaluación global
+
+La presencia de SPOF en esta arquitectura es una consecuencia directa de la restricción de recursos impuesta por el proyecto (dos instancias dentro del Free Tier de AWS). Las mitigaciones adoptadas —detección temprana mediante alertas, auto-provisionamiento vía IaC y persistencia de configuración— proporcionan un nivel de resiliencia aceptable para el alcance del TFG, permitiendo la detección y recuperación ante fallos, aunque no su prevención automática. En un entorno productivo, las mejoras prioritarias serían la introducción de un segundo controlador de dominio, la separación del stack de monitorización del Gateway y la adopción de mecanismos de alta disponibilidad para el nodo de borde.
+
 ---
 
 ## 4. Implantación y configuración
