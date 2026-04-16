@@ -18,6 +18,14 @@ Parameters:
     Type: String
     NoEcho: true
     MinLength: 8
+  TelegramBotToken:
+    Description: Token del bot de Telegram para Alertmanager
+    Type: String
+    NoEcho: true
+  TelegramChatId:
+    Description: Chat ID del grupo de Telegram para Alertmanager
+    Type: String
+    NoEcho: true
 
 Resources:
   VPC:
@@ -144,7 +152,7 @@ Resources:
           apt-get install -y iptables-persistent netfilter-persistent git
           netfilter-persistent save
           git clone https://github.com/ariasmon/proyecto-final.git /home/ubuntu/despliegue
-          bash /home/ubuntu/despliegue/scripts/bootstrap.sh
+          bash /home/ubuntu/despliegue/scripts/bootstrap.sh --bot-token "${TelegramBotToken}" --chat-id "${TelegramChatId}"
 
   WindowsInternal:
     Type: AWS::EC2::Instance
@@ -251,7 +259,7 @@ Resources:
 
 Outputs:
   IPElasticaUbuntu:
-    Description: IP publica del Gateway (SSH/RDP/Grafana)
+    Description: IP publica del Gateway (SSH/Grafana/WireGuard)
     Value: !Ref ElasticIPGateway
   URIGrafana:
     Description: URL de acceso a Grafana

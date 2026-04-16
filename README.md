@@ -1474,13 +1474,13 @@ El script utiliza un marcador `/etc/tfg-bootstrap-done`. Si el archivo existe, e
 
 #### Tokens de Telegram
 
-El script acepta los tokens de Telegram como parámetros opcionales:
+Los tokens de Telegram se pasan como parámetros de CloudFormation (`TelegramBotToken` y `TelegramChatId`) y se inyectan automáticamente al script bootstrap:
 
 ```bash
-bash /home/ubuntu/despliegue/scripts/bootstrap.sh --bot-token <TOKEN> --chat-id <CHAT_ID>
+bash /home/ubuntu/despliegue/scripts/bootstrap.sh --bot-token "${TelegramBotToken}" --chat-id "${TelegramChatId}"
 ```
 
-Si no se proporcionan, Alertmanager queda configurado con placeholders y las alertas no se enviarán hasta completar la configuración manualmente:
+Si no se proporcionan al crear el stack, Alertmanager queda configurado con placeholders y las alertas no se enviarán hasta completar la configuración manualmente:
 
 ```bash
 sed -i 's/TU_BOT_TOKEN_AQUI/<token>/' /etc/prometheus/alertmanager.yml
@@ -1846,6 +1846,32 @@ CloudFormation
                    └─ Crear marcador C:\tfg-bootstrap-done → FIN
 ```
 
+#### Fase 1: CloudFormation — Parámetros del stack
+
+El template `despliegue-tfg.yml` acepta los siguientes parámetros:
+
+| Parámetro | Descripción | Obligatorio |
+|-----------|-------------|:-----------:|
+| `KeyName` | Par de claves (.pem) para acceso SSH/RDP | Sí |
+| `SafeModePassword` | Contraseña del modo seguro de AD (DSRM) | Sí |
+| `TelegramBotToken` | Token del bot de Telegram para alertas | No* |
+| `TelegramChatId` | Chat ID del grupo de Telegram para alertas | No* |
+
+\* Si no se proporcionan los tokens de Telegram, Alertmanager queda con placeholders y las alertas no funcionarán hasta configurarlas manualmente.
+
+Ejemplo de despliegue:
+
+```bash
+aws cloudformation create-stack \
+  --stack-name tfg \
+  --template-body file://despliegue-tfg.yml \
+  --parameters \
+    ParameterKey=KeyName,ParameterValue=mi-key \
+    ParameterKey=SafeModePassword,ParameterValue=MiClave#2026 \
+    ParameterKey=TelegramBotToken,ParameterValue=123456:ABC-DEF \
+    ParameterKey=TelegramChatId,ParameterValue=-100123456789
+```
+
 #### Fase 1: CloudFormation — UserData mínimos
 
 Los UserData de ambos servidores en `despliegue-tfg.yml` se limitan a la configuración imprescindible para que los bootstrap puedan ejecutarse, y a su lanzamiento:
@@ -1889,7 +1915,7 @@ El script `scripts/bootstrap.sh` se ejecuta automáticamente desde el UserData d
 | 4 | Instalar Alertmanager 0.28.1 | Desde release de GitHub (soporte Telegram nativo) |
 | 5 | Clonar repositorio | Si ya existe, `git pull` |
 | 6 | Copiar configs | `prometheus.yml`, `alert_rules.yml`, `alertmanager.yml` |
-| 7 | Configurar tokens Telegram | Parámetros opcionales `--bot-token` / `--chat-id` (si no se pasan, quedan placeholders) |
+| 7 | Configurar tokens Telegram | Parámetros `--bot-token` / `--chat-id` desde CloudFormation (si no se pasan, quedan placeholders) |
 | 8 | Configurar iptables-logging | Reglas LOG + logrotate + martians |
 | 9 | Configurar métricas iptables | Script cron + textfile collector de Node Exporter |
 | 10 | Configurar WireGuard | Generación automática de claves + `wg0.conf` + regla MASQUERADE VPN |
@@ -1961,7 +1987,7 @@ El script es seguro ejecutarlo múltiples veces:
 | Alertmanager 0.28.1 | ✅ | |
 | WireGuard (claves + config) | ✅ | |
 | iptables logging + métricas custom | ✅ | |
-| Tokens Telegram | | ✅ |
+| Tokens Telegram | ✅ | |
 | Cambio contraseña Grafana | | ✅ |
 | **Windows Server** | | |
 | Red estática + ruta VPN | ✅ | |
