@@ -28,7 +28,7 @@ mkdir -p "$CLIENTS_DIR"
 
 # Detectar IP elastica automaticamente si no se proporciona
 if [[ -z "$IP_ELASTICA" ]]; then
-    IP_ELASTICA=$(curl -s https://api.ipify.org 2>/dev/null ||curl -s https://ifconfig.me 2>/dev/null)
+    IP_ELASTICA=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null)
     if [[ -z "$IP_ELASTICA" ]]; then
         echo "Error: No se pudo detectar la IP elastica automaticamente."
         exit 1

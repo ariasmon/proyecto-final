@@ -80,7 +80,7 @@ fi
 # PASO 6: Copiar configs
 # ============================================================================
 echo "[6/12] Copiando configs..."
-cp "$DEPLOY_DIR"/configs/prometheus.yml /etc/prometheus/
+cp "$DEPLOY_DIR"/configs/prometheus.yml.example /etc/prometheus/prometheus.yml
 cp "$DEPLOY_DIR"/configs/alert_rules.yml /etc/prometheus/
 cp "$DEPLOY_DIR"/configs/alertmanager.yml.example /etc/prometheus/alertmanager.yml
 chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus

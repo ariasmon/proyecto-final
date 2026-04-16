@@ -22,8 +22,8 @@ fi
 # Habilitar log de paquetes sospechosos (martians)
 sysctl -w net.ipv4.conf.all.log_martians=1 2>/dev/null || true
 sysctl -w net.ipv4.conf.default.log_martians=1 2>/dev/null || true
-echo "net.ipv4.conf.all.log_martians=1" >> /etc/sysctl.conf 2>/dev/null || true
-echo "net.ipv4.conf.default.log_martians=1" >> /etc/sysctl.conf 2>/dev/null || true
+grep -qF "net.ipv4.conf.all.log_martians=1" /etc/sysctl.conf || echo "net.ipv4.conf.all.log_martians=1" >> /etc/sysctl.conf
+grep -qF "net.ipv4.conf.default.log_martians=1" /etc/sysctl.conf || echo "net.ipv4.conf.default.log_martians=1" >> /etc/sysctl.conf
 
 # Persistir reglas de iptables
 netfilter-persistent save 2>/dev/null || {
