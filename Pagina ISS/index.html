@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Portal Corporativo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Segoe UI, Arial, sans-serif; background: #f5f5f5; color: #1a1a1a; }
+
+    .header {
+      background: #ffffff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon {
+      width: 38px; height: 38px; border-radius: 8px;
+      background: #e6f1fb;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-icon svg { width: 22px; height: 22px; }
+    .logo-text { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+    .logo-sub { font-size: 12px; color: #666; }
+    .date { font-size: 13px; color: #666; }
+
+    .hero { padding: 2rem 2rem 1rem; background: #fff; border-bottom: 1px solid #e0e0e0; }
+    .welcome { font-size: 22px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+    .welcome-sub { font-size: 14px; color: #666; }
+
+    .section-title {
+      font-size: 11px; font-weight: 600; color: #888;
+      padding: 1.25rem 2rem 0.5rem;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      padding: 0 2rem 1rem;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      text-decoration: none;
+      display: block;
+    }
+    .card:hover { border-color: #b0b0b0; box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+    .card-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 10px;
+    }
+    .card-title { font-size: 14px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+    .card-desc { font-size: 12px; color: #666; line-height: 1.5; }
+
+    .panel {
+      margin: 0 2rem 1.25rem;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e9e9e9;
+      background: linear-gradient(180deg, #fbfbfb 0%, #ffffff 100%);
+    }
+    .panel-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+    .panel-subtitle { font-size: 13px; color: #666; line-height: 1.5; }
+    .panel-body { padding: 1.25rem; }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .search {
+      flex: 1 1 260px;
+      min-width: 220px;
+      border: 1px solid #d7d7d7;
+      border-radius: 10px;
+      padding: 0.8rem 0.95rem;
+      font: inherit;
+      color: #1a1a1a;
+      background: #fcfcfc;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 0.55rem 0.8rem;
+      border: 1px solid #d9e6f8;
+      background: #f4f8fe;
+      color: #2b5f9e;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .directory-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 1rem;
+    }
+    .directory-card {
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      padding: 1rem;
+      background: #fff;
+    }
+    .directory-card h3 { font-size: 14px; margin-bottom: 6px; color: #1a1a1a; }
+    .directory-card p { font-size: 12px; color: #666; line-height: 1.55; }
+    .directory-meta {
+      margin-top: 0.8rem;
+      font-size: 12px;
+      color: #444;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .directory-meta span {
+      padding: 0.35rem 0.55rem;
+      border-radius: 8px;
+      background: #f7f7f7;
+      border: 1px solid #ececec;
+    }
+    .admin-note {
+      margin: 0 2rem 1.5rem;
+      padding: 0.9rem 1rem;
+      border-radius: 12px;
+      background: #fff7e8;
+      border: 1px solid #f0d7a2;
+      color: #7a5600;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .notices { padding: 0.25rem 2rem 1.5rem; display: flex; flex-direction: column; gap: 8px; }
+    .notice {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .notice-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+    .notice-text { font-size: 13px; color: #1a1a1a; }
+    .notice-date { font-size: 11px; color: #888; margin-top: 2px; }
+
+    .footer {
+      border-top: 1px solid #e0e0e0;
+      padding: 1rem 2rem;
+      font-size: 12px; color: #888; text-align: center;
+      background: #fff; margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="2" width="7" height="7" rx="1.5" fill="#378ADD"/>
+        <rect x="11" y="2" width="7" height="7" rx="1.5" fill="#378ADD" opacity="0.6"/>
+        <rect x="2" y="11" width="7" height="7" rx="1.5" fill="#378ADD" opacity="0.6"/>
+        <rect x="11" y="11" width="7" height="7" rx="1.5" fill="#378ADD" opacity="0.3"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-text">Portal Corporativo</div>
+      <div class="logo-sub">Intranet del dominio</div>
+    </div>
+  </div>
+  <div class="date" id="fecha"></div>
+</div>
+
+<div class="hero">
+  <div class="welcome">Bienvenido/a al portal interno</div>
+  <div class="welcome-sub">Accede a los recursos y herramientas de tu organización</div>
+</div>
+
+<div class="section-title">Accesos rápidos</div>
+<div class="grid">
+
+  <a class="card" href="#">
+    <div class="card-icon" style="background:#e6f1fb;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="2" y="3" width="14" height="10" rx="1.5" stroke="#378ADD" stroke-width="1.5"/>
+        <path d="M6 16h6M9 13v3" stroke="#378ADD" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="card-title">Escritorio remoto</div>
+    <div class="card-desc">Conéctate a tu equipo desde cualquier lugar</div>
+  </a>
+
+  <a class="card" href="#">
+    <div class="card-icon" style="background:#eaf3de;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M9 2L2 6v6l7 4 7-4V6L9 2z" stroke="#3B6D11" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M2 6l7 4 7-4" stroke="#3B6D11" stroke-width="1.5"/>
+        <path d="M9 10v6" stroke="#3B6D11" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <div class="card-title">Recursos compartidos</div>
+    <div class="card-desc">Carpetas y archivos de la red</div>
+  </a>
+
+  <a class="card" href="directorio-usuarios.html">
+    <div class="card-icon" style="background:#faeeda;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <circle cx="9" cy="7" r="3.5" stroke="#BA7517" stroke-width="1.5"/>
+        <path d="M2.5 16c0-3.038 2.91-5.5 6.5-5.5s6.5 2.462 6.5 5.5" stroke="#BA7517" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="card-title">Directorio de usuarios</div>
+    <div class="card-desc">Busca contactos del dominio</div>
+  </a>
+
+  <a class="card" href="#">
+    <div class="card-icon" style="background:#fbeaf0;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="2" y="4" width="14" height="10" rx="1.5" stroke="#993556" stroke-width="1.5"/>
+        <path d="M2 7h14" stroke="#993556" stroke-width="1.5"/>
+        <path d="M6 4V2M12 4V2" stroke="#993556" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="card-title">Soporte TI</div>
+    <div class="card-desc">Abre un ticket de incidencia</div>
+  </a>
+
+  <a class="card" href="#">
+    <div class="card-icon" style="background:#eeedfe;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M3 14V5a1 1 0 011-1h10a1 1 0 011 1v9" stroke="#534AB7" stroke-width="1.5"/>
+        <path d="M1 14h16" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M7 10h4M9 7v3" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="card-title">Anuncios</div>
+    <div class="card-desc">Noticias y comunicados internos</div>
+  </a>
+
+  <a class="card" href="#">
+    <div class="card-icon" style="background:#e1f5ee;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="3" y="2" width="12" height="14" rx="1.5" stroke="#0F6E56" stroke-width="1.5"/>
+        <path d="M6 6h6M6 9h6M6 12h4" stroke="#0F6E56" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="card-title">Documentación</div>
+    <div class="card-desc">Manuales y procedimientos</div>
+  </a>
+
+</div>
+
+<div class="section-title" id="directorio-usuarios">Directorio de usuarios</div>
+<div class="panel">
+  <div class="panel-header">
+    <div class="panel-title">Acceso de usuarios de Active Directory</div>
+    <div class="panel-subtitle">Esta sección está pensada para usuarios autenticados del dominio y para el usuario Administrator, que puede revisar y gestionar altas, bajas y grupos.</div>
+  </div>
+  <div class="panel-body">
+    <div class="toolbar">
+      <input class="search" type="text" placeholder="Buscar usuario, grupo o departamento" aria-label="Buscar usuario, grupo o departamento" />
+      <div class="pill">Autenticación: Windows</div>
+      <div class="pill">Dominio: tfg.vp</div>
+      <div class="pill">Administrador: Administrator</div>
+    </div>
+
+    <div class="directory-grid">
+      <div class="directory-card">
+        <h3>Acceso para usuarios del dominio</h3>
+        <p>Los usuarios autenticados en Active Directory pueden consultar el directorio interno, localizar contactos y ver información básica de cada cuenta.</p>
+        <div class="directory-meta">
+          <span>Consulta</span>
+          <span>Contactos internos</span>
+          <span>Solo lectura</span>
+        </div>
+      </div>
+      <div class="directory-card">
+        <h3>Panel de administración</h3>
+        <p>El usuario Administrator dispone de acceso para gestionar usuarios, revisar grupos, y aplicar cambios sobre el directorio desde la misma intranet.</p>
+        <div class="directory-meta">
+          <span>Altas</span>
+          <span>Bajas</span>
+          <span>Grupos</span>
+        </div>
+      </div>
+      <div class="directory-card">
+        <h3>Seguridad recomendada</h3>
+        <p>La restricción real de acceso debe configurarse en IIS con Windows Authentication y reglas de autorización por grupos del dominio.</p>
+        <div class="directory-meta">
+          <span>IIS</span>
+          <span>AD</span>
+          <span>Permisos NTFS</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="admin-note">
+  Nota: este HTML muestra la interfaz del directorio, pero el control de acceso para usuarios del dominio y para Administrator debe hacerse en el servidor web con IIS. Si quieres, te preparo también la configuración exacta de Windows Authentication y Authorization Rules para que solo entren los grupos permitidos.
+</div>
+
+<div class="section-title">Avisos recientes</div>
+<div class="notices">
+  <div class="notice">
+    <div class="notice-dot" style="background:#378ADD;"></div>
+    <div>
+      <div class="notice-text">Mantenimiento programado del servidor este viernes de 22:00 a 00:00</div>
+      <div class="notice-date">Hoy</div>
+    </div>
+  </div>
+  <div class="notice">
+    <div class="notice-dot" style="background:#3B6D11;"></div>
+    <div>
+      <div class="notice-text">Nueva política de contraseñas en vigor desde el 1 de mayo</div>
+      <div class="notice-date">Hace 2 días</div>
+    </div>
+  </div>
+  <div class="notice">
+    <div class="notice-dot" style="background:#BA7517;"></div>
+    <div>
+      <div class="notice-text">Actualización de equipos en el departamento de administración</div>
+      <div class="notice-date">Hace 5 días</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Portal Corporativo · Solo para usuarios autorizados del dominio</div>
+
+<script>
+  const d = new Date();
+  const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+  document.getElementById('fecha').textContent = d.toLocaleDateString('es-ES', opts);
+</script>
+
+</body>
+</html>
