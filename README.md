@@ -1728,3 +1728,79 @@ wbadmin start systemstaterecovery -version:<VERSION_ID>
 ```
 
 Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (formato `mm/dd/yyyy-hh:mm`).
+
+### 4.19. Verificación y pruebas de conectividad
+
+Esta sección documenta la validación final de la infraestructura desplegada, verificando la conectividad de red desde el Windows Server hacia Internet, el Gateway y los servicios internos. Las pruebas acreditan el correcto funcionamiento del NAT, el routing, la resolución DNS y la conectividad VPN.
+
+#### Pruebas de conectividad desde Windows Server
+
+| Comando | Descripción | Resultado |
+|---------|-------------|-----------|
+| `tracert 8.8.8.8` | Ruta NAT por Gateway hacia Internet | ✅ Llega a destino en 8 saltos |
+| `tracert google.com` | DNS + routing hacia dominio público | ✅ DNS resuelve, tráfico sale por NAT |
+| `tracert 172.16.3.1` | Conectividad directa a interfaz VPN del Gateway | ✅ 1 salto, <1ms |
+| `ping 10.0.2.1` | Gateway reachable | ✅ 0% loss, <1ms |
+| `nslookup tfg.vp` | Resolución DNS del dominio interno | ✅ Resuelve a 10.0.2.75 |
+
+##### Tracert a Internet (8.8.8.8)
+
+![Tracert a 8.8.8.8](imagenes/tracert8.8.8.8.png)
+
+El primer salto `10.0.1.51` corresponde a la interfaz interna del Gateway Ubuntu. El tráfico sale del Windows Server (`10.0.2.75`) con destino a `0.0.0.0/0`, es interceptado por el Gateway (`10.0.2.1`) y NATeado hacia la IP pública del Gateway. El salto 3 con `*` (timeout) es normal, ya que algunos routers de transporte no responden mensajes ICMP TTL exceeded. El tracert confirma que el NAT está funcionando correctamente.
+
+##### Tracert a Internet (google.com)
+
+![Tracert a google.com](imagenes/tracert-google.com.png)
+
+El dominio `google.com` se resuelve mediante DNS a `142.251.167.139`, lo que acredita que el Windows Server puede realizar consultas DNS a través del Gateway. Los timeouts en los saltos 12-20 corresponden a equipos de backbone de Google que no responden ICMP, lo cual es comportamiento habitual. El tráfico llega correctamente al destino final (`ww-in-f139.1e100.net`).
+
+##### Tracert a través de VPN (172.16.3.1)
+
+![Tracert a 172.16.3.1](imagenes/tracert172.16.3.1.png)
+
+La IP `172.16.3.1` es la dirección de la interfaz WireGuard del Gateway. El tracert muestra conectividad directa en un único salto (`<1ms`), lo que confirma que la ruta estática en la tabla de rutas del Windows Server hacia la subred VPN (`172.16.3.0/24`) a través del Gateway (`10.0.2.1`) está correctamente configurada. Este resultado valida también que el enrutamiento interno de AWS y las reglas de forwarding en el Gateway están operativas.
+
+##### Gateway reachable (ping 10.0.2.1)
+
+![Ping a 10.0.2.1](imagenes/ping10.0.2.1.png)
+
+El Gateway responde con latencia inferior a 1ms y 0% de paquetes perdidos, confirmando que es reachable desde la subred privada. Este ping valida la conectividad de capa 3 entre el Windows Server y su puerta de enlace predeterminada.
+
+##### Resolución DNS (nslookup tfg.vp)
+
+![nslookup tfg.vp](imagenes/nslookup-tfg.vp.png)
+
+El servidor DNS del Active Directory (`10.0.2.75`) resuelve correctamente el nombre `tfg.vp` hacia su propia IP. El servidordns muestra `::1` (IPv6 localhost) como servidor de consulta, lo que indica que la consulta se realizó contra el resolver local configurado en el Windows Server. Este resultado acredita el funcionamiento del DNS integrado en Active Directory.
+
+#### Verificación de monitorización en Grafana
+
+Los dashboards de Grafana confirman el estado operativo de ambos servidores:
+
+![Dashboard Ubuntu](imagenes/panel-ubuntu.png)
+
+*Dashboard de Node Exporter en el Gateway Ubuntu, mostrando CPU, memoria, disco y tráfico de red.*
+
+![Dashboard Windows Server](imagenes/panel-windows-server.png)
+
+*Dashboard del Windows Server con métricas de CPU, memoria, disco, procesos y tráfico de red.*
+
+![Alerta InstanceDown](imagenes/Alerta-WindowsServer-Caido.png)
+
+*Alerta recibida en Telegram cuando el Windows Server dejó de responder, demostrando la integración entre Prometheus y Alertmanager.*
+
+#### Verificación de Targets en Prometheus
+
+Para verificar que Prometheus está recolectando métricas de todos los targets:
+
+```bash
+curl localhost:9090/api/v1/targets | python3 -m json.tool
+```
+
+Los targets esperados deben mostrar estado `health: "up"`:
+
+| Target | Endpoint | Descripción |
+|--------|----------|-------------|
+| `prometheus` | `localhost:9090` | Métricas del propio Prometheus |
+| `node` | `localhost:9100` | Métricas del Gateway Ubuntu (Node Exporter) |
+| `windows-server` | `10.0.2.75:9182` | Métricas del Windows Server (Windows Exporter) |
