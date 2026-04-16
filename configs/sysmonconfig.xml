@@ -1,0 +1,36 @@
+<!--
+  Sysmon basic configuration for TFG
+  Monitors: process creation, network connections, file creation time changes
+  Based on SwiftOnSecurity/sysmon-config community config
+-->
+<Sysmon schemaversion="4">
+  <HashAlgorithms>md5,sha256</HashAlgorithms>
+  <EventFiltering>
+    <RuleGroup name="Process Creation" groupRelation="or">
+      <ProcessCreate onmatch="exclude">
+        <CommandLine condition="begin with">C:\Windows\system32\wermgr.exe -queuereporting</CommandLine>
+        <CommandLine condition="begin with">C:\Windows\system32\DllHost.exe /Processid</CommandLine>
+        <Image condition="is">C:\Windows\system32\conhost.exe</Image>
+        <Image condition="is">C:\Windows\system32\audiodg.exe</Image>
+        <ParentImage condition="is">C:\Windows\system32\SearchIndexer.exe</ParentImage>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <RuleGroup name="Network Connections" groupRelation="or">
+      <NetworkConnect onmatch="exclude">
+        <DestinationIp condition="is">127.0.0.1</DestinationIp>
+        <DestinationHostname condition="end with">.microsoft.com</DestinationHostname>
+      </NetworkConnect>
+    </RuleGroup>
+
+    <RuleGroup name="File Creation Time" groupRelation="or">
+      <FileCreateTime onmatch="exclude">
+        <Image condition="image">OneDrive.exe</Image>
+      </FileCreateTime>
+    </RuleGroup>
+
+    <RuleGroup name="Process Termination" groupRelation="or">
+      <ProcessTerminate onmatch="exclude"/>
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>

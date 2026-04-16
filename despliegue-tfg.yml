@@ -184,6 +184,7 @@ Resources:
             Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force
 
           Install-WindowsFeature Windows-Server-Backup -IncludeManagementTools
+          Install-WindowsFeature Web-WebServer,Web-Windows-Auth,Web-CGI
 
           schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM 2>$null
           </powershell>
