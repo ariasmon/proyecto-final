@@ -128,7 +128,7 @@ Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente de
 
 | Componente | Rol en la arquitectura | SPOF | Impacto si falla |
 |------------|----------------------|------|-------------------|
-| Gateway Ubuntu | NAT, VPN, Port Forwarding, stack de monitorización | Sí | Subred privada sin salida a Internet, VPN caída, sin dashboards ni alertas |
+| Gateway Ubuntu | NAT, VPN, stack de monitorización | Sí | Subred privada sin salida a Internet, VPN caída, sin dashboards ni alertas |
 | Windows Server (DC) | Controlador de dominio único, DNS integrado, GPOs | Sí | Sin autenticación, sin resolución DNS, políticas no aplicadas |
 | Stack de monitorización | Prometheus + Grafana + Alertmanager (en el Gateway) | Sí | Pérdida total de visibilidad del estado de la infraestructura y de notificaciones |
 
@@ -212,7 +212,7 @@ sudo netfilter-persistent save
 Para garantizar la estabilidad operativa y la conectividad a través del Gateway, se han realizado las siguientes configuraciones críticas:
 
 1. **Optimización de Instancia:** Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM).
-2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `127.0.0.1` y `8.8.8.8`.
+2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `8.8.8.8` y `8.8.4.4` durante el primer arranque. Tras la promoción a Domain Controller, el bootstrap cambia el DNS a `127.0.0.1` (AD DNS local) y `8.8.8.8` como secundario.
 3. **Ruta estática VPN:** Ruta hacia la subred VPN (`172.16.3.0/24`) a través del Gateway (`10.0.2.1`), necesaria para que el Windows Server pueda responder a clientes VPN.
 4. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell:
 
@@ -490,7 +490,7 @@ VpnRoute:
 
 Se ha implementado un aprovisionamiento de cero toques (**Zero-Touch Provisioning**) utilizando la propiedad `UserData`, que permite que las instancias se configuren automáticamente en el primer arranque.
 
-**Ubuntu Gateway** — Configuración automática de NAT, iptables y persistencia:
+**Ubuntu Gateway** — Configuración de red mínima y lanzamiento del bootstrap automático:
 
 ```yaml
 UbuntuGateway:
@@ -515,8 +515,10 @@ UbuntuGateway:
         iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
-        apt-get install -y iptables-persistent netfilter-persistent
+        apt-get install -y iptables-persistent netfilter-persistent git
         netfilter-persistent save
+        git clone https://github.com/ariasmon/proyecto-final.git /home/ubuntu/despliegue
+        bash /home/ubuntu/despliegue/scripts/bootstrap.sh --bot-token "${TelegramBotToken}" --chat-id "${TelegramChatId}"
 ```
 
 **Windows Server** — Configuración de red mínima y lanzamiento del bootstrap automático:
@@ -544,7 +546,8 @@ WindowsInternal:
         Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
         route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
         Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
-        powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1"
+        $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
+        powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
         </powershell>
 ```
 
@@ -1645,7 +1648,7 @@ El script realiza las siguientes acciones:
 | `scripts/ad-user-service.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Lógica de validación y creación de usuarios (desplegado por configurar-api-alta-ad.ps1) |
 | `scripts/configurar-api-alta-ad.ps1` | Repositorio | Configuración IIS de la API |
 | `scripts/create-user.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint de alta de usuario |
-| `scripts/web.config` | `C:\inetpub\wwwroot\misitio\api\` | Configuración IIS del endpoint |
+| `scripts/web.config` | `scripts/` | `C:\inetpub\wwwroot\misitio\api\` | Configuración IIS del endpoint CGI y autorización AD |
 
 ![Portal web IIS](imagenes/Imagen-PaginaWebIIS.png)
 *Figura 4: Portal web interno desplegado en IIS sobre el Windows Server.*
@@ -1654,7 +1657,7 @@ El script realiza las siguientes acciones:
 
 Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
 
-> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización de la unidad `E:`, la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el UserData del Windows Server en el template CloudFormation (`despliegue-tfg.yml`). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
+> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización de la unidad `E:`, la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` (véase la sección 4.20). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
 
 #### Prerrequisito: volumen de backup
 
@@ -1812,7 +1815,7 @@ CloudFormation
     ├─ Crear VPC, Subredes, SGs, Instancias, Volúmenes, IPs
     │
     ├─ UserData (Ubuntu Gateway)
-    │    ├─ Habilitar IP forwarding + iptables (NAT, DNAT, FORWARD)
+    │    ├─ Habilitar IP forwarding + iptables (NAT, FORWARD)
     │    ├─ Instalar iptables-persistent + git
     │    ├─ Clonar repositorio
     │    └─ Ejecutar bootstrap.sh
