@@ -73,16 +73,12 @@ Resources:
   SGGateway:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Gateway Ubuntu - SSH, Grafana, WireGuard, Prometheus y trafico interno
+      GroupDescription: Gateway Ubuntu - SSH, WireGuard, Prometheus y trafico interno
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
           CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 9090
@@ -261,11 +257,11 @@ Resources:
 
 Outputs:
   IPElasticaUbuntu:
-    Description: IP publica del Gateway (SSH/Grafana/WireGuard)
+    Description: IP publica del Gateway (SSH/WireGuard)
     Value: !Ref ElasticIPGateway
   URIGrafana:
-    Description: URL de acceso a Grafana
-    Value: !Sub "http://${ElasticIPGateway}:3000"
+    Description: URL de acceso a Grafana (solo via VPN)
+    Value: "http://172.16.3.1:3000"
   URIPrometheus:
     Description: URL de acceso a Prometheus (solo desde VPC)
     Value: !Sub "http://${ElasticIPGateway}:9090"

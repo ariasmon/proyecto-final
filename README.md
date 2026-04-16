@@ -87,7 +87,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 | **Administrador de sistemas** | Responsable de la gestión y mantenimiento de la infraestructura | Acceso SSH al Gateway, acceso RDP al Windows Server, visualización de dashboards de monitorización, recepción de alertas |
 | **Administrador de dominio** | Gestiona el Active Directory y los usuarios del dominio | Acceso RDP al Windows Server, acceso al dominio tfg.vp |
 | **Usuario corporativo** | Usuario final que accede a recursos del dominio | Conexión VPN para acceso remoto, acceso al dominio corporativo |
-| **Operador de monitorización** | Supervisa el estado de la infraestructura | Acceso a Grafana, recepción de alertas en Telegram |
+| **Operador de monitorización** | Supervisa el estado de la infraestructura | Acceso a Grafana (vía VPN), recepción de alertas en Telegram |
 
 #### Matriz de acceso por perfil
 
@@ -96,7 +96,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 | SSH Gateway | ✓ | - | - | ✓ |
 | RDP Windows (vía VPN) | ✓ | ✓ | - | - |
 | VPN | ✓ | ✓ | ✓ | - |
-| Grafana | ✓ | - | - | ✓ |
+| Grafana (vía VPN) | ✓ | - | - | ✓ |
 | Dominio AD | ✓ | ✓ | ✓ | - |
 | Alertas | ✓ | - | - | ✓ |
 
@@ -113,7 +113,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 
 ### 3.2. Diseño de Seguridad y Accesos
 
-1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3000/TCP (Grafana), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
+1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
 2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
 ### 3.3 Esquema de la arquitectura
@@ -407,16 +407,12 @@ El Security Group del Gateway define las reglas de acceso perimetral:
 SGGateway:
   Type: AWS::EC2::SecurityGroup
   Properties:
-    GroupDescription: Gateway Ubuntu - SSH, Grafana, WireGuard, Prometheus y trafico interno
+    GroupDescription: Gateway Ubuntu - SSH, WireGuard, Prometheus y trafico interno
     VpcId: !Ref VPC
     SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
-        CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 3000
-        ToPort: 3000
         CidrIp: 0.0.0.0/0
       - IpProtocol: tcp
         FromPort: 9090
@@ -867,11 +863,11 @@ sudo systemctl start grafana-server
 
 | Parámetro | Valor |
 |-----------|-------|
-| **URL** | `http://<IP_ELASTICA_GATEWAY>:3000` |
+| **URL** | `http://172.16.3.1:3000` (requiere VPN activa) |
 | **Usuario por defecto** | `admin` |
 | **Contraseña por defecto** | `admin` |
 
-Se recomienda cambiar la contraseña en el primer acceso.
+Se recomienda cambiar la contraseña en el primer acceso. Grafana solo es accesible conectándose previamente a la VPN WireGuard (sección 4.7).
 
 #### Configuración de Data Source
 
@@ -1502,10 +1498,10 @@ systemctl status prometheus prometheus-node-exporter grafana-server prometheus-a
 ```
 
 Puertos en escucha:
-- `9090` — Prometheus
-- `9100` — Node Exporter
-- `3000` — Grafana
-- `9093` — Alertmanager
+- `9090` — Prometheus (solo VPC)
+- `9100` — Node Exporter (solo VPC)
+- `3000` — Grafana (solo vía VPN)
+- `9093` — Alertmanager (solo VPC)
 - `51820/UDP` — WireGuard
 
 Grafana ya tiene pre-configurado:
@@ -1513,7 +1509,7 @@ Grafana ya tiene pre-configurado:
 - Dashboard Node Exporter Full
 - Dashboard Windows Server personalizado
 
-Accede a `http://<IP_GATEWAY>:3000` y navega a **Dashboards** para ver los disponibles.
+Accede a `http://172.16.3.1:3000` (con VPN activa) y navega a **Dashboards** para ver los disponibles.
 
 #### Creación de clientes VPN
 
