@@ -5,8 +5,27 @@
 
 set -e
 
+export DEBIAN_FRONTEND=noninteractive
+
 GITHUB_REPO="https://github.com/ariasmon/proyecto-final.git"
 DEPLOY_DIR="/home/ubuntu/despliegue"
+MARKER_FILE="/etc/tfg-bootstrap-done"
+
+BOT_TOKEN_PARAM=""
+CHAT_ID_PARAM=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --bot-token) BOT_TOKEN_PARAM="$2"; shift 2 ;;
+        --chat-id)   CHAT_ID_PARAM="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+if [ -f "$MARKER_FILE" ]; then
+    echo "Bootstrap ya completado ($MARKER_FILE existe). Saliendo."
+    exit 0
+fi
 
 echo "=============================================="
 echo "Bootstrap del Gateway Ubuntu - TFG"
@@ -14,31 +33,16 @@ echo "=============================================="
 echo ""
 
 # ============================================================================
-# VERIFICACION: ¿Ya esta configurado?
-# ============================================================================
-if systemctl is-active --quiet prometheus 2>/dev/null; then
-    echo "El Gateway ya parece estar configurado (Prometheus esta activo)."
-    echo "Ejecutar bootstrap de nuevo sobrescribira configs, tokens y provisioning de Grafana."
-    echo -n "¿Continuar de todas formas? [N/y]: "
-    read -r confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        echo "Abortado. Para reconfigurar, ejecuta este script con 'y'."
-        exit 0
-    fi
-    echo "Continuando..."
-fi
-
-# ============================================================================
 # PASO 1: Actualizar sistema
 # ============================================================================
-echo "[1/12] Actualizando sistema..."
+echo "[1/13] Actualizando sistema..."
 apt-get update -y
 apt-get upgrade -y
 
 # ============================================================================
-# PASO 2: Añadir repositorio oficial de Grafana
+# PASO 2: Anadir repositorio oficial de Grafana
 # ============================================================================
-echo "[2/12] Configurando repositorio de Grafana..."
+echo "[2/13] Configurando repositorio de Grafana..."
 apt-get install -y apt-transport-https software-properties-common wget
 wget -q -O /usr/share/keyrings/grafana.key https://apt.grafana.com/gpg.key
 echo "deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main" \
@@ -48,14 +52,14 @@ apt-get update -y
 # ============================================================================
 # PASO 3: Instalar software desde repositorios apt
 # ============================================================================
-echo "[3/12] Instalando software base..."
+echo "[3/13] Instalando software base..."
 apt-get install -y prometheus prometheus-node-exporter grafana wireguard \
   iptables-persistent netfilter-persistent curl python3 jq
 
 # ============================================================================
 # PASO 4: Instalar Alertmanager 0.28.1 desde release
 # ============================================================================
-echo "[4/12] Instalando Alertmanager 0.28.1..."
+echo "[4/13] Instalando Alertmanager 0.28.1..."
 cd /tmp
 wget -q https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
 tar xzf alertmanager-0.28.1.linux-amd64.tar.gz
@@ -81,7 +85,7 @@ EOF
 # ============================================================================
 # PASO 5: Clonar repositorio
 # ============================================================================
-echo "[5/12] Clonando repositorio..."
+echo "[5/13] Clonando repositorio..."
 if [ -d "$DEPLOY_DIR" ]; then
     echo "Repositorio ya existe, actualizando..."
     git -C "$DEPLOY_DIR" pull origin main
@@ -92,35 +96,32 @@ fi
 # ============================================================================
 # PASO 6: Copiar configs
 # ============================================================================
-echo "[6/12] Copiando configs..."
+echo "[6/13] Copiando configs..."
 cp "$DEPLOY_DIR"/configs/prometheus.yml /etc/prometheus/prometheus.yml
 cp "$DEPLOY_DIR"/configs/alert_rules.yml /etc/prometheus/
 cp "$DEPLOY_DIR"/configs/alertmanager.yml /etc/prometheus/alertmanager.yml
 chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 
 # ============================================================================
-# PASO 7: Preguntar tokens Telegram (interactivo)
+# PASO 7: Configurar tokens Telegram
 # ============================================================================
-echo "[7/12] Configuracion de Telegram..."
-echo ""
-echo "=============================================="
-echo "Configuracion de Alertmanager - Telegram"
-echo "=============================================="
-echo ""
-echo "Token del bot de Telegram:"
-read -r BOT_TOKEN
-echo "Chat ID del grupo de Telegram:"
-read -r CHAT_ID
+echo "[7/13] Configuracion de Telegram..."
 
-sed -i "s/TU_BOT_TOKEN_AQUI/$BOT_TOKEN/" /etc/prometheus/alertmanager.yml
-sed -i "s/TU_CHAT_ID_AQUI/$CHAT_ID/" /etc/prometheus/alertmanager.yml
-
-echo "Tokens aplicados correctamente."
+if [[ -n "$BOT_TOKEN_PARAM" && -n "$CHAT_ID_PARAM" ]]; then
+    sed -i "s/TU_BOT_TOKEN_AQUI/$BOT_TOKEN_PARAM/" /etc/prometheus/alertmanager.yml
+    sed -i "s/TU_CHAT_ID_AQUI/$CHAT_ID_PARAM/" /etc/prometheus/alertmanager.yml
+    echo "Tokens aplicados correctamente."
+else
+    echo "Tokens de Telegram no proporcionados (--bot-token, --chat-id)."
+    echo "Configurados con placeholders. Para completar manualmente:"
+    echo "  sed -i 's/TU_BOT_TOKEN_AQUI/<token>/' /etc/prometheus/alertmanager.yml"
+    echo "  sed -i 's/TU_CHAT_ID_AQUI/<chat_id>/' /etc/prometheus/alertmanager.yml"
+fi
 
 # ============================================================================
 # PASO 8: Configurar iptables-logging
 # ============================================================================
-echo "[8/12] Configurando logging de iptables..."
+echo "[8/13] Configurando logging de iptables..."
 cp "$DEPLOY_DIR"/scripts/iptables-logging.sh /opt/
 chmod +x /opt/iptables-logging.sh
 bash /opt/iptables-logging.sh
@@ -128,7 +129,7 @@ bash /opt/iptables-logging.sh
 # ============================================================================
 # PASO 9: Configurar iptables-metrics y Node Exporter textfile
 # ============================================================================
-echo "[9/12] Configurando metricas de iptables..."
+echo "[9/13] Configurando metricas de iptables..."
 cp "$DEPLOY_DIR"/scripts/iptables-metrics.sh /opt/
 chmod +x /opt/iptables-metrics.sh
 
@@ -145,11 +146,12 @@ systemctl restart prometheus-node-exporter
 # ============================================================================
 # PASO 10: Configurar WireGuard
 # ============================================================================
-echo "[10/12] Configurando WireGuard..."
+echo "[10/13] Configurando WireGuard..."
 
 if [ ! -f /etc/wireguard/wg0.conf ]; then
     echo "Generando claves WireGuard..."
-    wg genkey | tee /etc/wireguard/privatekey | wg pubkey > /etc/wireguard/publickey
+    wg genkey > /etc/wireguard/privatekey
+    wg pubkey < /etc/wireguard/privatekey > /etc/wireguard/publickey
     chmod 600 /etc/wireguard/privatekey
 
     SERVER_PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
@@ -177,7 +179,7 @@ fi
 # ============================================================================
 # PASO 11: Habilitar e iniciar servicios
 # ============================================================================
-echo "[11/12] Habilitando servicios..."
+echo "[11/13] Habilitando servicios..."
 
 systemctl daemon-reload
 
@@ -195,7 +197,7 @@ echo "Servicios habilitados."
 # ============================================================================
 # PASO 12: Provisioning automatico de Grafana
 # ============================================================================
-echo "[12/12] Configurando Grafana con provisioning automatico..."
+echo "[12/13] Configurando Grafana con provisioning automatico..."
 
 mkdir -p /etc/grafana/provisioning/datasources
 mkdir -p /etc/grafana/provisioning/dashboards
@@ -238,6 +240,8 @@ echo ""
 echo "Puertos en escucha:"
 ss -tlnp | grep -E "9090|9100|3000|9093|51820" || echo "(ninguno detected)"
 
+touch "$MARKER_FILE"
+
 echo ""
 echo "=============================================="
 echo "Bootstrap completado"
@@ -249,4 +253,11 @@ echo "  - Acceder a Prometheus: http://<IP_GATEWAY>:9090"
 echo "  - Ver clientes VPN: sudo wg show"
 echo "  - Para crear cliente VPN: sudo $DEPLOY_DIR/scripts/crear-cliente-vpn.sh <nombre>"
 echo "  - Dashboards ya disponibles en Grafana (Node Exporter Full y Windows Server)"
+if [[ -z "$BOT_TOKEN_PARAM" || -z "$CHAT_ID_PARAM" ]]; then
+    echo ""
+    echo "  IMPORTANTE: Tokens de Telegram pendientes. Ejecutar:"
+    echo "    sed -i 's/TU_BOT_TOKEN_AQUI/<token>/' /etc/prometheus/alertmanager.yml"
+    echo "    sed -i 's/TU_CHAT_ID_AQUI/<chat_id>/' /etc/prometheus/alertmanager.yml"
+    echo "    systemctl restart prometheus-alertmanager"
+fi
 echo ""

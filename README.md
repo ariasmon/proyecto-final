@@ -22,7 +22,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos (Active Directory).
 * **Active Directory:** Despliegue de dominio Windows para gestión centralizada de identidades.
 * **VPN (WireGuard):** Configuración de túnel VPN para acceso remoto seguro de usuarios al dominio.
-* **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía Port Forwarding en el Gateway).
+* **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía VPN WireGuard).
 * **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway.
 
 ### 1.3. Recursos identificados
@@ -38,7 +38,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 ### 1.4. Restricciones y condicionantes
 
 * **Económicas:** Viabilidad dentro de la capa gratuita (Free Tier) de AWS siempre que sea posible.
-* **Seguridad:** Administración a través de puertos estándar (22 y 3389) protegidos por Security Groups.
+* **Seguridad:** Administración a través de puertos estándar (22 y 51820) protegidos por Security Groups. RDP solo accesible vía VPN.
 * **Plazos:** Despliegue funcional antes de la fecha de defensa del TFG.
 
 ### 1.5. Cronograma preliminar
@@ -49,7 +49,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 | Fase 2 | Diseño | 3 - 4 | Diagramas de red VPC y políticas de seguridad. |
 | Fase 3 | Despliegue Infra | 5 - 6 | Creación de VPC, subredes y automatización IaC. |
 | Fase 4 | Configuración | 7 - 8 | Configuración de NAT, Firewall y Monitorización. |
-| Fase 5 | Accesos | 9 | Habilitación de SSH y RDP mediante Port Forwarding. |
+| Fase 5 | Accesos | 9 | Habilitación de SSH y acceso RDP vía VPN. |
 | Fase 6 | Validación | 10 | Pruebas de conectividad y estrés. |
 | Fase 7 | Documentación | 11 - 12 | Redacción final de la memoria y defensa. |
 
@@ -67,7 +67,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **RF-06 (Active Directory):** Implementar dominio Windows con AD para gestión centralizada de usuarios y recursos.
 * **RF-07 (Acceso VPN):** Configurar WireGuard para permitir acceso remoto seguro de usuarios al dominio corporativo.
 * **RF-08 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram) ante anomalías críticas.
-* **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP (3389).
+* **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP a través de VPN.
 
 ### 2.2. Requisitos No Funcionales (RNF)
 
@@ -94,7 +94,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 | Recurso | Admin Sistemas | Admin Dominio | Usuario Corp. | Operador |
 |---------|---------------|---------------|---------------|----------|
 | SSH Gateway | ✓ | - | - | ✓ |
-| RDP Windows | ✓ | ✓ | - | - |
+| RDP Windows (vía VPN) | ✓ | ✓ | - | - |
 | VPN | ✓ | ✓ | ✓ | - |
 | Grafana | ✓ | - | - | ✓ |
 | Dominio AD | ✓ | ✓ | ✓ | - |
@@ -113,8 +113,8 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 
 ### 3.2. Diseño de Seguridad y Accesos
 
-1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3389/TCP (RDP Forward), 3000/TCP (Grafana), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
-2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde SG-Gateway, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
+1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3000/TCP (Grafana), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -136,7 +136,7 @@ Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente de
 
 ##### Gateway Ubuntu
 
-El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7), punto de Port Forwarding para RDP y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
+El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server se realiza exclusivamente a través de la VPN, sin exposición directa a Internet. Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
 
 **Mitigaciones adoptadas:**
 
@@ -197,9 +197,6 @@ sudo iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
 
 # NAT para tráfico VPN hacia subred privada
 sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
-
-# Reenvío de puerto RDP (DNAT)
-sudo iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
 
 # Forwarding VPN ↔ subred privada
 sudo iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
@@ -410,16 +407,12 @@ El Security Group del Gateway define las reglas de acceso perimetral:
 SGGateway:
   Type: AWS::EC2::SecurityGroup
   Properties:
-    GroupDescription: Gateway Ubuntu - SSH, RDP, Grafana, WireGuard, Prometheus y trafico interno
+    GroupDescription: Gateway Ubuntu - SSH, Grafana, WireGuard, Prometheus y trafico interno
     VpcId: !Ref VPC
     SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
-        CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 3389
-        ToPort: 3389
         CidrIp: 0.0.0.0/0
       - IpProtocol: tcp
         FromPort: 3000
@@ -454,10 +447,6 @@ SGInternal:
     SecurityGroupIngress:
       - IpProtocol: -1
         CidrIp: 172.16.3.0/24
-      - IpProtocol: tcp
-        FromPort: 3389
-        ToPort: 3389
-        SourceSecurityGroupId: !Ref SGGateway
       - IpProtocol: tcp
         FromPort: 9182
         ToPort: 9182
@@ -522,7 +511,6 @@ UbuntuGateway:
         echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
         iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
         iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
-        iptables -t nat -A PREROUTING -p tcp --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
         iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
         iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
         export DEBIAN_FRONTEND=noninteractive
@@ -531,7 +519,7 @@ UbuntuGateway:
         netfilter-persistent save
 ```
 
-**Windows Server** — Asignación de IP estática, DNS, ruta VPN y desactivación del firewall:
+**Windows Server** — Configuración de red mínima y lanzamiento del bootstrap automático:
 
 ```yaml
 WindowsInternal:
@@ -550,13 +538,17 @@ WindowsInternal:
         <powershell>
         Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
         $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
-        New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1","8.8.8.8")
+        $ifIndex = $adapter.ifIndex
+        Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
+        New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
+        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
         route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
+        powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1"
         </powershell>
 ```
 
-Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración de red y previene errores humanos durante el despliegue del laboratorio. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
+El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.20). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
 
 ### 4.7. Implementación de VPN con WireGuard
 
@@ -1198,9 +1190,9 @@ Los archivos de configuración de ejemplo están disponibles en el directorio `c
 
 | Archivo | Descripción |
 |---------|-------------|
-| `configs/prometheus.yml.example` | Configuración de Prometheus |
+| `configs/prometheus.yml` | Configuración de Prometheus |
 | `configs/alert_rules.yml` | Reglas de alerta |
-| `configs/alertmanager.yml.example` | Configuración de Alertmanager |
+| `configs/alertmanager.yml` | Configuración de Alertmanager |
 | `scripts/iptables-logging.sh` | Configuración de reglas LOG de iptables y logrotate |
 | `scripts/iptables-metrics.sh` | Métricas custom de iptables para Prometheus |
 
@@ -1454,50 +1446,53 @@ La métrica `iptables_dropped_packets_total` alimenta la regla de alerta `PortSc
 
 ### 4.16. Bootstrap del Gateway
 
-Una vez desplegada la infraestructura mediante CloudFormation y establecido el SSH al Ubuntu Gateway, se debe ejecutar el script `bootstrap.sh` para completar la configuración del servidor.
+El script `scripts/bootstrap.sh` se ejecuta automáticamente desde el UserData de CloudFormation al crear la instancia Ubuntu Gateway. No requiere intervención manual para su ejecución.
 
 #### Funcionamiento del script
 
-El script `scripts/bootstrap.sh` automatiza la configuración completa del Gateway Ubuntu en 12 pasos:
+El script `scripts/bootstrap.sh` automatiza la configuración completa del Gateway Ubuntu en 13 pasos:
 
 | Paso | Descripción |
 |------|-------------|
 | 1 | Actualizar sistema (apt update + upgrade) |
 | 2 | Añadir repositorio oficial de Grafana |
-| 3 | Instalar software desde repositorios apt |
+| 3 | Instalar software desde repositorios apt (Prometheus, Node Exporter, Grafana, WireGuard, iptables-persistent) |
 | 4 | Instalar Alertmanager 0.28.1 desde release oficial |
 | 5 | Clonar repositorio del proyecto en `/home/ubuntu/despliegue` |
 | 6 | Copiar configs de monitorización desde el repositorio |
-| 7 | Solicitar token y Chat ID de Telegram (interactivo) |
+| 7 | Configurar tokens de Telegram (ver más abajo) |
 | 8 | Configurar reglas LOG de iptables |
 | 9 | Configurar métricas custom de iptables y textfile collector |
 | 10 | Configurar WireGuard (generación automática de claves) |
 | 11 | Habilitar e iniciar todos los servicios |
 | 12 | Configurar provisioning automático de Grafana (datasource y dashboards) |
-| 13 | Verificar estado de los servicios |
+| 13 | Verificar estado de los servicios y crear marcador |
 
-#### Ejecución
+#### Idempotencia
+
+El script utiliza un marcador `/etc/tfg-bootstrap-done`. Si el archivo existe, el script sale inmediatamente sin realizar cambios. Esto permite que el UserData de CloudFormation ejecute el script de forma segura en cada arranque sin duplicar configuraciones.
+
+#### Tokens de Telegram
+
+El script acepta los tokens de Telegram como parámetros opcionales:
 
 ```bash
-# Desde el Ubuntu Gateway, tras hacer SSH
-bash /home/ubuntu/despliegue/scripts/bootstrap.sh
+bash /home/ubuntu/despliegue/scripts/bootstrap.sh --bot-token <TOKEN> --chat-id <CHAT_ID>
 ```
 
-El script solicita interactivamente:
-- **Token del bot de Telegram** — para configurar Alertmanager
-- **Chat ID del grupo** — para dirigir las notificaciones
+Si no se proporcionan, Alertmanager queda configurado con placeholders y las alertas no se enviarán hasta completar la configuración manualmente:
+
+```bash
+sed -i 's/TU_BOT_TOKEN_AQUI/<token>/' /etc/prometheus/alertmanager.yml
+sed -i 's/TU_CHAT_ID_AQUI/<chat_id>/' /etc/prometheus/alertmanager.yml
+systemctl restart prometheus-alertmanager
+```
 
 Estos valores nunca se almacenan en el repositorio, lo que mantiene las credenciales fuera del código.
 
-#### Requisitos previos
-
-- Acceso SSH al Ubuntu Gateway
-- Conexión a Internet desde el servidor (para clonar el repositorio e instalar paquetes)
-- Repo clonado en `/home/ubuntu/despliegue` (ya hecho por el UserData de CloudFormation)
-
 #### Verificación posterior
 
-Tras la ejecución, los servicios deben estar activos:
+Tras la ejecución automática, los servicios deben estar activos:
 
 ```bash
 systemctl status prometheus prometheus-node-exporter grafana-server prometheus-alertmanager wg-quick@wg0
@@ -1799,6 +1794,190 @@ wbadmin start systemstaterecovery -version:<VERSION_ID>
 ```
 
 Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (formato `mm/dd/yyyy-hh:mm`).
+
+### 4.20. Automatización completa del despliegue
+
+El despliegue de ambos servidores (Gateway Ubuntu y Windows Server) se realiza de forma automática mediante scripts idempotentes ejecutados desde el UserData de CloudFormation, sin intervención manual. Esto cumple con el requisito RF-02 (Despliegue Automatizado) y el principio GitOps (RNF-02) definidos en la sección 2.
+
+#### Visión general del flujo
+
+El despliegue automático consta de dos fases:
+
+1. **Fase 1 — CloudFormation**: Crea la infraestructura AWS y lanza los bootstrap vía UserData.
+2. **Fase 2 — Bootstrap**: Los scripts detectan el estado de cada servidor y ejecutan las acciones correspondientes. En el caso de Windows, tras la promoción a DC, el servidor reinicia y el script continúa automáticamente.
+
+```
+CloudFormation
+    │
+    ├─ Crear VPC, Subredes, SGs, Instancias, Volúmenes, IPs
+    │
+    ├─ UserData (Ubuntu Gateway)
+    │    ├─ Habilitar IP forwarding + iptables (NAT, DNAT, FORWARD)
+    │    ├─ Instalar iptables-persistent + git
+    │    ├─ Clonar repositorio
+    │    └─ Ejecutar bootstrap.sh
+    │         ├─ Prometheus + Grafana + Alertmanager + Node Exporter
+    │         ├─ WireGuard (claves automáticas)
+    │         ├─ iptables logging + métricas custom
+    │         ├─ Provisioning Grafana (datasource + dashboards)
+    │         └─ Marcador /etc/tfg-bootstrap-done → FIN
+    │
+    └─ UserData (Windows Server)
+         ├─ Configurar red estática (IP, GW, DNS 8.8.8.8, ruta VPN)
+         ├─ Desactivar firewall
+         ├─ Descargar bootstrap-windows.ps1 desde GitHub
+         └─ Ejecutar bootstrap-windows.ps1
+              │
+              ├── [ESTADO 0] AD DS no instalado
+              │    ├─ Instalar Git, features, Windows Exporter
+              │    ├─ Montar disco backup + tarea semanal
+              │    ├─ Clonar repositorio
+              │    ├─ Registrar ScheduledTask para post-reboot
+              │    └─ Promocionar a DC → REBOOT
+              │
+              └── [ESTADO 1] AD DS instalado (tras reboot)
+                   ├─ DNS forwarders + ajuste DNS adaptador
+                   ├─ Crear OUs y grupos de seguridad
+                   ├─ Instalar Sysmon
+                   ├─ Desplegar IIS (MiSitio) + contenido web
+                   ├─ Configurar API /api + autenticación Windows
+                   ├─ Generar ad-users.json + tarea exportación
+                   ├─ Eliminar ScheduledTask de bootstrap
+                   └─ Crear marcador C:\tfg-bootstrap-done → FIN
+```
+
+#### Fase 1: CloudFormation — UserData mínimos
+
+Los UserData de ambos servidores en `despliegue-tfg.yml` se limitan a la configuración imprescindible para que los bootstrap puedan ejecutarse, y a su lanzamiento:
+
+**Ubuntu Gateway:**
+
+```bash
+# IP forwarding + iptables (NAT, DNAT, FORWARD)
+# DEBIAN_FRONTEND=noninteractive + apt-get install iptables-persistent git
+# git clone + bash bootstrap.sh
+```
+
+Las reglas de iptables se configuran en el UserData porque son necesarias para que la red funcione antes de que el bootstrap instale nada.
+
+**Windows Server:**
+
+```powershell
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+# IP estática + Gateway + DNS 8.8.8.8 + ruta VPN
+# Descargar + ejecutar bootstrap-windows.ps1
+```
+
+| UserData | ¿Por qué mínimo? |
+|----------|-------------------|
+| Red (IP, GW, DNS, rutas) | Sin red no se descarga nada |
+| iptables NAT/DNAT (Ubuntu) | Necesarias para que la red funcione inmediatamente |
+| Firewall off (Windows) | Una línea, persiste |
+| Descargar + ejecutar bootstrap | Punto de entrada a la automatización |
+
+Todo lo demás (software, servicios, configuración) lo gestionan los scripts.
+
+#### Fase 2: Bootstrap del Gateway Ubuntu
+
+El script `scripts/bootstrap.sh` se ejecuta automáticamente desde el UserData de CloudFormation y configura el Gateway en una sola pasada (no requiere reboot):
+
+| Paso | Acción | Detalle |
+|------|--------|---------|
+| 1 | Actualizar sistema | `apt-get update + upgrade` |
+| 2 | Añadir repositorio Grafana | Clave GPG + source list oficial |
+| 3 | Instalar software base | Prometheus, Node Exporter, Grafana, WireGuard, iptables-persistent, curl, jq |
+| 4 | Instalar Alertmanager 0.28.1 | Desde release de GitHub (soporte Telegram nativo) |
+| 5 | Clonar repositorio | Si ya existe, `git pull` |
+| 6 | Copiar configs | `prometheus.yml`, `alert_rules.yml`, `alertmanager.yml` |
+| 7 | Configurar tokens Telegram | Parámetros opcionales `--bot-token` / `--chat-id` (si no se pasan, quedan placeholders) |
+| 8 | Configurar iptables-logging | Reglas LOG + logrotate + martians |
+| 9 | Configurar métricas iptables | Script cron + textfile collector de Node Exporter |
+| 10 | Configurar WireGuard | Generación automática de claves + `wg0.conf` + regla MASQUERADE VPN |
+| 11 | Habilitar servicios | Prometheus, Grafana, Alertmanager, Node Exporter, WireGuard |
+| 12 | Provisioning Grafana | Datasource Prometheus + dashboards (Node Exporter Full, Windows Server) |
+| 13 | Verificación + marcador | Comprobar servicios activos + crear `/etc/tfg-bootstrap-done` |
+
+#### Fase 2: Bootstrap Windows Server — Estado 0 (AD DS no instalado)
+
+El script detecta que el rol AD DS no está instalado y ejecuta las acciones de preparación antes de la promoción a Domain Controller:
+
+| Paso | Acción | Detalle |
+|------|--------|---------|
+| 1 | Instalar Git for Windows | Descarga silenciosa desde release oficial |
+| 2 | Instalar roles y features | AD DS + IIS (Web-WebServer, Web-Windows-Auth, Web-CGI) + Windows Server Backup |
+| 3 | Instalar Windows Exporter | MSI con collectors optimizados + regla firewall puerto 9182 |
+| 4 | Montar disco de backup | Bucle de espera (máx 5 min) para detectar el volumen EBS, luego `Initialize-Disk` + `Format-Volume E:` |
+| 5 | Tarea backup semanal | `Backup-AD-Semanal`: domingo 03:00, `wbadmin systemstatebackup` |
+| 6 | Clonar repositorio | `C:\tfg-despliegue` desde GitHub |
+| 7 | Registrar ScheduledTask | `TFG-Bootstrap` con trigger `AtStartup` para continuar tras el reboot |
+| 8 | Promocionar a DC | `Install-ADDSForest` con dominio `tfg.vp` → reboot automático |
+
+#### Fase 2: Bootstrap Windows Server — Estado 1 (AD DS instalado, tras reboot)
+
+Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Bootstrap` ejecuta el script de nuevo. Este detecta que AD DS ya está instalado y completa la configuración:
+
+| Paso | Acción | Detalle |
+|------|--------|---------|
+| 1 | DNS forwarders | `8.8.8.8` y `8.8.4.4` en el servidor DNS de AD |
+| 2 | DNS del adaptador | Cambiar a `127.0.0.1` + `8.8.8.8` (AD DNS ya disponible) |
+| 3 | Estructura de OUs | `Usuarios`, `Equipos`, `Servidores`, `Grupos`, `Admins` bajo `DC=tfg,DC=vp` |
+| 4 | Grupos de seguridad | `GG_Usuarios`, `GG_Admins`, `GG_Portal-AD-Admins` en `OU=Grupos,DC=tfg,DC=vp` |
+| 5 | Instalar Sysmon | Con `sysmonconfig.xml` del repositorio clonado |
+| 6 | IIS: sitio MiSitio | Crear sitio, copiar `Pagina IIS/*` a `C:\inetpub\wwwroot\misitio\`, eliminar Default Web Site |
+| 7 | API `/api` | Directorio `api\` con `ad-user-service.ps1`, `create-user.ps1` y `web.config`; webapp en IIS; Win Auth habilitada, Anonymous deshabilitada; permisos `IIS_IUSRS`/`IUSR` en directorio de logs |
+| 8 | `ad-users.json` | Primera exportación de usuarios AD al directorio web |
+| 9 | Tarea exportación usuarios | Cada hora, ejecuta `exportar-usuarios-ad.ps1` para mantener `ad-users.json` actualizado |
+| 10 | Eliminar ScheduledTask | `TFG-Bootstrap` ya no necesaria |
+| 11 | Marcador de finalización | `C:\tfg-bootstrap-done` → el script no hace nada si se ejecuta de nuevo |
+
+#### Mecanismo de idempotencia
+
+El script es seguro ejecutarlo múltiples veces:
+
+1. **Marcador `C:\tfg-bootstrap-done`**: si existe, el script sale inmediatamente sin hacer nada.
+2. **Detección de estado**: la condición `(Get-WindowsFeature AD-Domain-Services).Installed` distingue el Estado 0 del Estado 1.
+3. **Operaciones idempotentes**: la creación de OUs, grupos, sitio IIS y webapp `/api` comprueban si ya existen antes de crearlos.
+4. **Log completo**: todas las acciones se registran en `C:\tfg-bootstrap.log` con timestamps.
+
+#### Archivos del bootstrap
+
+| Archivo | Ubicación en repo | Ubicación en servidor | Función |
+|---------|-------------------|----------------------|---------|
+| `bootstrap-windows.ps1` | `scripts/` | `C:\bootstrap-windows.ps1` | Script principal de automatización |
+| `web.config` | `scripts/` | `C:\inetpub\wwwroot\misitio\api\` | Handler CGI para ejecutar `.ps1` vía IIS |
+| `ad-user-service.ps1` | `scripts/` | `C:\inetpub\wwwroot\misitio\api\` | Lógica de validación y creación de usuarios AD |
+| `create-user.ps1` | `scripts/` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint POST de alta de usuario |
+| `exportar-usuarios-ad.ps1` | `scripts/` | `C:\tfg-despliegue\scripts\` | Exportación de usuarios AD a JSON |
+| `sysmonconfig.xml` | `configs/` | `C:\Sysmon\` | Configuración de Sysmon |
+
+#### Configuración automática vs manual
+
+| Componente | Automatizado | Manual post-despliegue |
+|------------|:------------:|:-----------------------:|
+| **Gateway Ubuntu** | | |
+| NAT / iptables / IP forwarding | ✅ | |
+| Prometheus + Node Exporter | ✅ | |
+| Grafana + provisioning (datasource + dashboards) | ✅ | |
+| Alertmanager 0.28.1 | ✅ | |
+| WireGuard (claves + config) | ✅ | |
+| iptables logging + métricas custom | ✅ | |
+| Tokens Telegram | | ✅ |
+| Cambio contraseña Grafana | | ✅ |
+| **Windows Server** | | |
+| Red estática + ruta VPN | ✅ | |
+| Firewall desactivado | ✅ | |
+| Windows Exporter | ✅ | |
+| Volumen backup + tarea semanal | ✅ | |
+| Active Directory (promoción a DC) | ✅ | |
+| DNS forwarders | ✅ | |
+| Estructura de OUs | ✅ | |
+| Grupos de seguridad (GG_) | ✅ | |
+| Sysmon | ✅ | |
+| IIS + sitio MiSitio | ✅ | |
+| API /api + autenticación Windows | ✅ | |
+| ad-users.json + tarea exportación | ✅ | |
+| GPOs (contraseñas, firewall equipos) | | ✅ |
+| Políticas de auditoría avanzada | | ✅ |
 
 ### 4.19. Verificación y pruebas de conectividad
 
