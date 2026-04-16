@@ -1453,3 +1453,133 @@ Una vez bootstrapped el Gateway, se pueden crear clientes VPN con el script dedi
 ```bash
 sudo /home/ubuntu/despliegue/scripts/crear-cliente-vpn.sh <nombre_cliente>
 ```
+
+### 4.17. Portal web interno y API de gestión de usuarios AD
+
+Se ha construido una solución web interna en **IIS** sobre el Windows Server que permite consultar y gestionar usuarios de Active Directory desde un navegador. El portal está compuesto por un frontend de consulta de usuarios y una API segura para altas de usuario, ambos desplegados sobre IIS con autenticación Windows.
+
+#### Arquitectura del portal
+
+| Componente | Tecnología | Descripción |
+|------------|-----------|-------------|
+| Portal principal | HTML/CSS/JS (IIS) | Página de inicio con acceso al directorio |
+| Directorio de usuarios | HTML/CSS/JS | Frontend con búsqueda, filtros, paginación y exportación CSV |
+| Exportación AD | PowerShell | Script que extrae usuarios de AD y genera `ad-users.json` |
+| API de altas | PowerShell + IIS CGI | Endpoint POST `/api/create-user.ps1` |
+| Configuración IIS | PowerShell | Script de despliegue de la aplicación `/api` |
+
+#### Directorio de usuarios
+
+El directorio de usuarios es una aplicación web que consume el fichero `ad-users.json` generado por el script de exportación. Sus funcionalidades son:
+
+- **Búsqueda** por texto libre
+- **Filtros** por departamento y estado (habilitado/deshabilitado)
+- **Ordenación** por nombre y usuario
+- **Paginación** configurable (10, 25, 50, 100 registros por página)
+- **Exportación CSV** de los resultados filtrados
+- **Indicadores** de total de usuarios, filtrados y última sincronización
+
+#### Exportación de usuarios desde Active Directory
+
+El script `scripts/exportar-usuarios-ad.ps1` extrae los usuarios del dominio y genera un fichero JSON que el frontend consume:
+
+```powershell
+param(
+    [string]$OutputPath = $(Join-Path $PSScriptRoot "..\ad-users.json")
+)
+
+Import-Module ActiveDirectory -ErrorAction Stop
+
+$users = Get-ADUser -Filter * -Properties SamAccountName, DisplayName, Name, mail, Department, Enabled |
+    Select-Object SamAccountName, DisplayName, Name, @{Name='Mail';Expression={$_.mail}}, Department, Enabled |
+    Sort-Object SamAccountName
+
+$users | ConvertTo-Json -Depth 3 | Set-Content -Path $OutputPath -Encoding UTF8
+```
+
+Campos exportados: `SamAccountName`, `DisplayName`, `Name`, `Mail`, `Department`, `Enabled`.
+
+#### API segura para altas de usuario
+
+El endpoint `POST /api/create-user.ps1` permite crear usuarios en Active Directory de forma controlada. Sus características de seguridad son:
+
+| Mecanismo | Descripción |
+|-----------|-------------|
+| Autenticación Windows | Obligatoria, Anonymous deshabilitado |
+| Autorización | Solo usuarios/grupos autorizados (`TFG\Administrator`, `GG-Portal-AD-Admins`) |
+| Validación de entrada | Formato UPN, OU LDAP, política de contraseñas, detección de duplicados |
+| Auditoría | Log en formato JSONL con timestamp, actor, acción y estado |
+
+**Validaciones implementadas:**
+
+- **SamAccountName:** 3-31 caracteres alfanuméricos, punto, guion o guion bajo, comenzando por letra
+- **UserPrincipalName:** formato `usuario@dominio`
+- **Contraseña:** mínimo 10 caracteres, mayúscula, minúscula, número y símbolo
+- **OU:** formato LDAP válido (`OU=...,DC=...`)
+- **Duplicados:** comprueba que no exista un usuario con el mismo `SamAccountName`
+
+**Formato de la petición POST:**
+
+```json
+{
+  "SamAccountName": "jgarcia",
+  "GivenName": "Juan",
+  "Surname": "García",
+  "DisplayName": "Juan García",
+  "UserPrincipalName": "jgarcia@tfg.vp",
+  "Password": "Contrasena$egura1",
+  "Mail": "jgarcia@tfg.vp",
+  "Department": "IT",
+  "OU": "OU=Usuarios,DC=tfg,DC=vp",
+  "Groups": ["GG_Usuarios"]
+}
+```
+
+**Auditoría:** Cada operación (éxito o error) se registra en `ad-user-audit.log` con la siguiente estructura:
+
+```json
+{"timestamp":"2026-04-15T20:30:00.0000000+02:00","action":"create-user","actor":"TFG\\Administrator","samAccountName":"jgarcia","upn":"jgarcia@tfg.vp","ou":"OU=Usuarios,DC=tfg,DC=vp","status":"success"}
+```
+
+#### Configuración de IIS
+
+El script `scripts/configurar-api-alta-ad.ps1` despliega y configura la aplicación `/api` en IIS:
+
+```powershell
+param(
+    [string]$SiteName = 'MiSitio',
+    [string]$ApiPhysicalPath = 'C:\inetpub\wwwroot\misitio\api',
+    [string]$AuditLogPath = 'C:\inetpub\wwwroot\misitio\logs\ad-user-audit.log'
+)
+```
+
+El script realiza las siguientes acciones:
+
+1. Instala las características de IIS necesarias (`Web-CGI`, `Web-Windows-Auth`)
+2. Crea la aplicación `/api` en el sitio IIS especificado
+3. Habilita la autenticación Windows y deshabilita la autenticación anónima
+4. Crea el directorio y fichero de audit log con permisos para `IIS_IUSRS` e `IUSR`
+
+#### Flujo de operación
+
+1. Se ejecuta `scripts/exportar-usuarios-ad.ps1` en el Windows Server
+2. El script consulta AD y actualiza `ad-users.json`
+3. `directorio-usuarios.html` consume `ad-users.json` y muestra los resultados
+4. Para altas de usuario, se envía un POST a `/api/create-user.ps1`
+5. La API valida permisos, valida datos, crea el usuario en AD y audita la acción
+
+#### Archivos del portal
+
+| Archivo | Ubicación | Descripción |
+|---------|-----------|-------------|
+| `index.html` | `C:\inetpub\wwwroot\misitio\` | Portal principal |
+| `directorio-usuarios.html` | `C:\inetpub\wwwroot\misitio\` | Directorio de usuarios |
+| `ad-users.json` | `C:\inetpub\wwwroot\misitio\` | Datos de usuarios exportados |
+| `scripts/exportar-usuarios-ad.ps1` | Repositorio | Script de exportación |
+| `scripts/ad-user-service.ps1` | Repositorio | Lógica de validación y creación de usuarios |
+| `scripts/configurar-api-alta-ad.ps1` | Repositorio | Configuración IIS de la API |
+| `api/create-user.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint de alta de usuario |
+| `api/web.config` | `C:\inetpub\wwwroot\misitio\api\` | Configuración IIS del endpoint |
+
+![Portal web IIS](imagenes/Imagen-PaginaWebISS.png)
+*Figura 4: Portal web interno desplegado en IIS sobre el Windows Server.*
