@@ -22,10 +22,12 @@ Parameters:
     Description: Token del bot de Telegram para Alertmanager
     Type: String
     NoEcho: true
+    Default: ""
   TelegramChatId:
     Description: Chat ID del grupo de Telegram para Alertmanager
     Type: String
     NoEcho: true
+    Default: ""
 
 Resources:
   VPC:
