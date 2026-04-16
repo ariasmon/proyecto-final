@@ -65,6 +65,19 @@ chmod +x /usr/bin/prometheus-alertmanager
 mkdir -p /var/lib/prometheus/alertmanager
 chown -R prometheus:prometheus /var/lib/prometheus/alertmanager
 
+cat > /etc/systemd/system/prometheus-alertmanager.service << 'EOF'
+[Unit]
+Description=Prometheus Alertmanager
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/prometheus-alertmanager --config.file=/etc/prometheus/alertmanager.yml --storage.path=/var/lib/prometheus/alertmanager
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # ============================================================================
 # PASO 5: Clonar repositorio
 # ============================================================================
@@ -165,6 +178,8 @@ fi
 # PASO 11: Habilitar e iniciar servicios
 # ============================================================================
 echo "[11/12] Habilitando servicios..."
+
+systemctl daemon-reload
 
 systemctl enable prometheus prometheus-node-exporter grafana-server \
   prometheus-alertmanager wg-quick@wg0
