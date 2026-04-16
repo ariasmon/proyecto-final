@@ -1578,8 +1578,153 @@ El script realiza las siguientes acciones:
 | `scripts/exportar-usuarios-ad.ps1` | Repositorio | Script de exportación |
 | `scripts/ad-user-service.ps1` | Repositorio | Lógica de validación y creación de usuarios |
 | `scripts/configurar-api-alta-ad.ps1` | Repositorio | Configuración IIS de la API |
-| `api/create-user.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint de alta de usuario |
-| `api/web.config` | `C:\inetpub\wwwroot\misitio\api\` | Configuración IIS del endpoint |
+| `scripts/create-user.ps1` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint de alta de usuario |
+| `scripts/web.config` | `C:\inetpub\wwwroot\misitio\api\` | Configuración IIS del endpoint |
 
 ![Portal web IIS](imagenes/Imagen-PaginaWebISS.png)
 *Figura 4: Portal web interno desplegado en IIS sobre el Windows Server.*
+
+### 4.18. Copia de seguridad de Active Directory
+
+Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
+
+> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización de la unidad `E:`, la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el UserData del Windows Server en el template CloudFormation (`despliegue-tfg.yml`). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
+
+#### Prerrequisito: volumen de backup
+
+El volumen de backup se crea automáticamente al desplegar el stack de CloudFormation. No obstante, si es necesario crearlo manualmente:
+
+##### Creación del volumen en AWS
+
+1. Abrir la consola de AWS.
+2. Ir a **EC2 > Volumes**.
+3. Seleccionar **Create volume**.
+4. Configurar:
+   - Tipo: `gp3`
+   - Tamaño: `10 GiB`
+   - Availability Zone: la misma que la instancia `Windows-AD-TFG`
+5. Crear el volumen.
+6. Seleccionarlo y pulsar **Attach volume**.
+7. Asociarlo a la instancia `Windows-AD-TFG`.
+
+##### Inicialización en Windows Server
+
+Una vez adjuntado el disco:
+
+1. Abrir **Disk Management**.
+2. Inicializar el nuevo disco si aparece sin inicializar.
+3. Crear un volumen simple.
+4. Formatearlo en **NTFS**.
+5. Asignar la letra **E:**.
+6. Poner la etiqueta **Backup**.
+
+![Creación del disco de backup](imagenes/Creaccion%20disco%20duro%20.png)
+*Figura 5: Disco de backup creado y formateado en la unidad E:.*
+
+#### Instalación de Windows Server Backup
+
+Para usar la consola de copias de seguridad y `wbadmin`, hay que instalar la característica **Windows Server Backup**.
+
+Desde PowerShell:
+
+```powershell
+Install-WindowsFeature Windows-Server-Backup -IncludeManagementTools
+```
+
+O desde Server Manager: **Add roles and features** → **Features** → marcar **Windows Server Backup**.
+
+#### Backup manual del estado del sistema
+
+El backup manual del estado del sistema guarda los componentes esenciales de Active Directory y del sistema operativo necesarios para restaurar el controlador de dominio.
+
+```cmd
+wbadmin start systemstatebackup -backuptarget:E: -quiet
+```
+
+![Backup del estado del sistema](imagenes/Creacciondelbackup.png)
+*Figura 6: Backup del estado del sistema en ejecución.*
+
+Este backup protege, entre otros elementos:
+
+- Base de datos de Active Directory (`ntds.dit`)
+- SYSVOL, donde residen GPOs y scripts
+- Registro del sistema
+- DNS integrado en AD
+- COM+
+- Certificados del sistema
+
+#### Verificación de backups existentes
+
+Para comprobar que las copias se están generando correctamente:
+
+```cmd
+wbadmin get versions -backuptarget:E:
+```
+
+![Versiones de backup disponibles](imagenes/CopiasDisponiblesbackup.png)
+*Figura 7: Listado de versiones de backup almacenadas en el volumen E:.*
+
+Este comando muestra las versiones disponibles almacenadas en el volumen de backup.
+
+#### Backup completo del servidor
+
+Si se quiere preparar una recuperación completa del equipo, incluyendo los volúmenes críticos necesarios para arrancar el sistema desde cero:
+
+```cmd
+wbadmin start backup -allcritical -backuptarget:E: -quiet
+```
+
+Este tipo de copia es más amplia que el estado del sistema, porque incluye los volúmenes críticos del servidor.
+
+#### Automatización con Task Scheduler
+
+La tarea programada se crea automáticamente en el despliegue de CloudFormation. Los parámetros son:
+
+- Nombre: `Backup-AD-Semanal`
+- Frecuencia: semanal
+- Día: domingo
+- Hora: 03:00
+- Usuario: `SYSTEM`
+- Acción: ejecutar `wbadmin start systemstatebackup -backuptarget:E: -quiet`
+
+Para crearla manualmente:
+
+```cmd
+schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM
+```
+
+![Tarea programada de backup semanal](imagenes/CreaccionSemanalbackup.png)
+*Figura 8: Tarea `Backup-AD-Semanal` configurada en el Programador de tareas.*
+
+O alternativamente desde la interfaz gráfica del **Task Scheduler**:
+
+1. Abrir **Task Scheduler**.
+2. Crear una tarea nueva.
+3. Definir un desencadenador semanal, domingo a las 03:00.
+4. Configurar la acción para ejecutar `wbadmin`.
+5. Indicar que la tarea se ejecute como `SYSTEM`.
+
+#### Restauración
+
+En caso de fallo, la restauración debe hacerse desde **Directory Services Restore Mode (DSRM)**.
+
+##### Arranque en DSRM
+
+1. Reiniciar el servidor en modo DSRM.
+2. Iniciar sesión con la contraseña configurada al promover el controlador de dominio.
+
+##### Recuperación del estado del sistema
+
+Consultar las versiones disponibles:
+
+```cmd
+wbadmin get versions -backuptarget:E:
+```
+
+Restaurar la versión elegida:
+
+```cmd
+wbadmin start systemstaterecovery -version:<VERSION_ID>
+```
+
+Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (formato `mm/dd/yyyy-hh:mm`).

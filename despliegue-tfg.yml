@@ -171,7 +171,32 @@ Resources:
           New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
           Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1","8.8.8.8")
           route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
+
+          Initialize-Disk -Number 1 -PartitionStyle MBR -PassThru |
+            New-Partition -UseMaximumSize -DriveLetter E |
+            Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force
+
+          Install-WindowsFeature Windows-Server-Backup -IncludeManagementTools
+
+          schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM 2>$null
           </powershell>
+
+  BackupVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      Size: 10
+      VolumeType: gp3
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: Backup-Volume-TFG
+
+  BackupVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      InstanceId: !Ref WindowsInternal
+      VolumeId: !Ref BackupVolume
+      Device: /dev/sdf
 
   ElasticIPGateway:
     Type: AWS::EC2::EIP
