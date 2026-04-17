@@ -48,31 +48,47 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 1. Instalar Git for Windows
     # ------------------------------------------------------------------
-    Write-Log "[1/9] Instalando Git for Windows..."
-    $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
-    $gitInstaller = "C:\Git-installer.exe"
-    Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
-    Start-Process -FilePath $gitInstaller -ArgumentList "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=gitlfs" -NoNewWindow -Wait
-    Remove-Item $gitInstaller -ErrorAction SilentlyContinue
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    try {
+        Write-Log "[1/9] Instalando Git for Windows..."
+        $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
+        $gitInstaller = "C:\Git-installer.exe"
+        Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
+        Start-Process -FilePath $gitInstaller -ArgumentList "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=gitlfs" -NoNewWindow -Wait
+        Remove-Item $gitInstaller -ErrorAction SilentlyContinue
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        Write-Log "Git instalado correctamente."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo instalar Git: $($_.Exception.Message)"
+    }
 
     # ------------------------------------------------------------------
     # 2. Instalar features
     # ------------------------------------------------------------------
-    Write-Log "[2/9] Instalando roles y features..."
-    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
-    Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
-    Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
+    try {
+        Write-Log "[2/9] Instalando roles y features..."
+        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
+        Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
+        Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
+        Write-Log "Roles y features instalados."
+    } catch {
+        Write-Log "ERROR: No se pudieron instalar roles y features: $($_.Exception.Message)"
+        exit 1
+    }
 
     # ------------------------------------------------------------------
     # 3. Instalar Windows Exporter
     # ------------------------------------------------------------------
-    Write-Log "[3/9] Instalando Windows Exporter..."
-    $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
-    Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
-    msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn | Out-Null
-    Remove-Item C:\windows_exporter.msi -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow | Out-Null
+    try {
+        Write-Log "[3/9] Instalando Windows Exporter..."
+        $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
+        Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i C:\windows_exporter.msi ENABLED_COLLECTORS=`"cpu,memory,logical_disk,net,os,system`" /qn" -NoNewWindow -Wait
+        Remove-Item C:\windows_exporter.msi -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+        Write-Log "Windows Exporter instalado."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo instalar Windows Exporter: $($_.Exception.Message)"
+    }
 
     # ------------------------------------------------------------------
     # 4. Esperar y montar disco de backup
@@ -114,35 +130,50 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 6. Clonar repositorio
     # ------------------------------------------------------------------
-    Write-Log "[6/9] Clonando repositorio..."
-    if (Test-Path $RepoDir) {
-        Write-Log "Repositorio ya existe, actualizando..."
-        & git -C $RepoDir pull origin main 2>&1 | ForEach-Object { Write-Log $_ }
-    } else {
-        & git clone $GitHubRepo $RepoDir 2>&1 | ForEach-Object { Write-Log $_ }
+    try {
+        Write-Log "[6/9] Clonando repositorio..."
+        if (Test-Path $RepoDir) {
+            Write-Log "Repositorio ya existe, actualizando..."
+            & git -C $RepoDir pull origin main 2>&1 | ForEach-Object { Write-Log $_ }
+        } else {
+            & git clone $GitHubRepo $RepoDir 2>&1 | ForEach-Object { Write-Log $_ }
+        }
+        Write-Log "Repositorio listo."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo clonar el repositorio: $($_.Exception.Message)"
     }
 
     # ------------------------------------------------------------------
     # 7. Crear ScheduledTask para post-reboot
     # ------------------------------------------------------------------
-    Write-Log "[7/9] Registrando tarea TFG-Bootstrap para post-reboot..."
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\bootstrap-windows.ps1"
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName "TFG-Bootstrap" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    try {
+        Write-Log "[7/9] Registrando tarea TFG-Bootstrap para post-reboot..."
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\bootstrap-windows.ps1"
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+        Register-ScheduledTask -TaskName "TFG-Bootstrap" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+        Write-Log "Tarea TFG-Bootstrap registrada."
+    } catch {
+        Write-Log "ERROR: No se pudo registrar la tarea TFG-Bootstrap: $($_.Exception.Message)"
+        exit 1
+    }
 
     # ------------------------------------------------------------------
     # 8. Habilitar RDP antes de promocion a DC
     # ------------------------------------------------------------------
-    Write-Log "[8/9] Habilitando RDP antes de promocion a DC..."
-    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-    Start-Service TermService -ErrorAction SilentlyContinue
-    Set-Service -Name TermService -StartupType Automatic
-    Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction SilentlyContinue | Out-Null
-    New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue | Out-Null
-    Write-Log "RDP habilitado."
+    try {
+        Write-Log "[8/9] Habilitando RDP antes de promocion a DC..."
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        Start-Service TermService -ErrorAction SilentlyContinue
+        Set-Service -Name TermService -StartupType Automatic
+        Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction SilentlyContinue | Out-Null
+        New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+        Write-Log "RDP habilitado."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo habilitar RDP: $($_.Exception.Message)"
+    }
 
     # ------------------------------------------------------------------
     # 9. Promocionar a Domain Controller
@@ -195,13 +226,17 @@ if ($adapter) {
 # ------------------------------------------------------------------
 # 2b. Habilitar y configurar RDP
 # ------------------------------------------------------------------
-Write-Log "[2b/11] Habilitando RDP..."
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-Start-Service TermService
-Set-Service -Name TermService -StartupType Automatic
-New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow | Out-Null
-Write-Log "RDP habilitado y configurado."
+try {
+    Write-Log "[2b/11] Habilitando RDP..."
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+    Start-Service TermService -ErrorAction SilentlyContinue
+    Set-Service -Name TermService -StartupType Automatic
+    New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+    Write-Log "RDP habilitado y configurado."
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo habilitar RDP: $($_.Exception.Message)"
+}
 
 # ------------------------------------------------------------------
 # 3. Crear estructura de OUs
@@ -242,29 +277,30 @@ foreach ($g in $groups) {
 # ------------------------------------------------------------------
 # 5. Instalar Sysmon
 # ------------------------------------------------------------------
-Write-Log "[5/11] Instalando Sysmon..."
-$sysmonZip = "C:\Sysmon.zip"
-$sysmonDir = "C:\Sysmon"
-$configPath = "$sysmonDir\sysmonconfig.xml"
+try {
+    Write-Log "[5/11] Instalando Sysmon..."
+    $sysmonZip = "C:\Sysmon.zip"
+    $sysmonDir = "C:\Sysmon"
+    $configPath = "$sysmonDir\sysmonconfig.xml"
 
-if (-not (Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue)) {
-    $sysmonUrl = "https://download.sysinternals.com/files/Sysmon.zip"
-    Invoke-WebRequest -Uri $sysmonUrl -OutFile $sysmonZip -UseBasicParsing
-    Expand-Archive -Path $sysmonZip -DestinationPath $sysmonDir -Force
-    Remove-Item $sysmonZip -ErrorAction SilentlyContinue
+    if (-not (Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue)) {
+        $sysmonUrl = "https://download.sysinternals.com/files/Sysmon.zip"
+        Invoke-WebRequest -Uri $sysmonUrl -OutFile $sysmonZip -UseBasicParsing
+        Expand-Archive -Path $sysmonZip -DestinationPath $sysmonDir -Force
+        Remove-Item $sysmonZip -ErrorAction SilentlyContinue
 
-    $repoConfig = Join-Path $RepoDir "configs\sysmonconfig.xml"
-    if (Test-Path $repoConfig) {
-        Copy-Item -Path $repoConfig -Destination $configPath -Force
-        Write-Log "sysmonconfig.xml copiado desde repositorio."
-    } else {
-        $fallbackUrl = "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/configs/sysmonconfig.xml"
-        try {
-            Invoke-WebRequest -Uri $fallbackUrl -OutFile $configPath -UseBasicParsing
-            Write-Log "sysmonconfig.xml descargado desde GitHub."
-        } catch {
-            Write-Log "ADVERTENCIA: No se pudo descargar sysmonconfig.xml, usando config basica."
-            @"
+        $repoConfig = Join-Path $RepoDir "configs\sysmonconfig.xml"
+        if (Test-Path $repoConfig) {
+            Copy-Item -Path $repoConfig -Destination $configPath -Force
+            Write-Log "sysmonconfig.xml copiado desde repositorio."
+        } else {
+            $fallbackUrl = "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/configs/sysmonconfig.xml"
+            try {
+                Invoke-WebRequest -Uri $fallbackUrl -OutFile $configPath -UseBasicParsing
+                Write-Log "sysmonconfig.xml descargado desde GitHub."
+            } catch {
+                Write-Log "ADVERTENCIA: No se pudo descargar sysmonconfig.xml, usando config basica."
+                @"
 <SysmonSchema xmlns="http://schemas.microsoft.com/sysmon/2016/09/schema">
 <Schemas>
 <EventFiltering>
@@ -272,82 +308,93 @@ if (-not (Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue)) {
 </Schemas>
 </SysmonSchema>
 "@ | Set-Content -Path $configPath -Encoding UTF8
+            }
         }
-    }
 
-    Push-Location $sysmonDir
-    .\sysmon64.exe -accepteula -i $configPath
-    Pop-Location
-    Write-Log "Sysmon instalado."
-} else {
-    Write-Log "Sysmon ya instalado, omitiendo."
+        Push-Location $sysmonDir
+        .\sysmon64.exe -accepteula -i $configPath
+        Pop-Location
+        Write-Log "Sysmon instalado."
+    } else {
+        Write-Log "Sysmon ya instalado, omitiendo."
+    }
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo instalar Sysmon: $($_.Exception.Message)"
 }
 
 # ------------------------------------------------------------------
 # 6. Desplegar IIS: sitio MiSitio + contenido web
 # ------------------------------------------------------------------
-Write-Log "[6/11] Configurando IIS..."
-Import-Module WebAdministration -ErrorAction Stop
+try {
+    Write-Log "[6/11] Configurando IIS..."
+    Import-Module WebAdministration -ErrorAction Stop
 
-if (-not (Test-Path $SiteDir)) {
-    New-Item -Path $SiteDir -ItemType Directory -Force | Out-Null
-}
+    if (-not (Test-Path $SiteDir)) {
+        New-Item -Path $SiteDir -ItemType Directory -Force | Out-Null
+    }
 
-$webSource = Join-Path $RepoDir "Pagina IIS"
-if (Test-Path $webSource) {
-    Copy-Item -Path "$webSource\*" -Destination $SiteDir -Recurse -Force
-    Write-Log "Contenido web copiado a $SiteDir"
-}
+    $webSource = Join-Path $RepoDir "Pagina IIS"
+    if (Test-Path $webSource) {
+        Copy-Item -Path "$webSource\*" -Destination $SiteDir -Recurse -Force
+        Write-Log "Contenido web copiado a $SiteDir"
+    }
 
-if (-not (Test-Path "IIS:\Sites\MiSitio")) {
-    Remove-Item "IIS:\Sites\Default Web Site" -Recurse -Force -ErrorAction SilentlyContinue
-    New-Website -Name "MiSitio" -PhysicalPath $SiteDir -Port 80 -Force | Out-Null
-    Write-Log "Sitio IIS 'MiSitio' creado."
-} else {
-    Write-Log "Sitio IIS 'MiSitio' ya existe."
+    if (-not (Test-Path "IIS:\Sites\MiSitio")) {
+        Remove-Item "IIS:\Sites\Default Web Site" -Recurse -Force -ErrorAction SilentlyContinue
+        New-Website -Name "MiSitio" -PhysicalPath $SiteDir -Port 80 -Force | Out-Null
+        Write-Log "Sitio IIS 'MiSitio' creado."
+    } else {
+        Write-Log "Sitio IIS 'MiSitio' ya existe."
+    }
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo configurar IIS: $($_.Exception.Message)"
 }
 
 # ------------------------------------------------------------------
 # 7. Configurar API AD
 # ------------------------------------------------------------------
-Write-Log "[7/11] Configurando API de altas de usuarios AD..."
+try {
+    Write-Log "[7/11] Configurando API de altas de usuarios AD..."
 
-if (-not (Test-Path $ApiDir)) {
-    New-Item -Path $ApiDir -ItemType Directory -Force | Out-Null
-}
-
-$apiScripts = @("ad-user-service.ps1", "create-user.ps1", "web.config")
-foreach ($file in $apiScripts) {
-    $src = Join-Path $RepoDir "scripts\$file"
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination $ApiDir -Force
-        Write-Log "  $file copiado a $ApiDir"
-    } else {
-        Write-Log "ADVERTENCIA: No se encontro $file en el repositorio."
+    if (-not (Test-Path $ApiDir)) {
+        New-Item -Path $ApiDir -ItemType Directory -Force | Out-Null
     }
-}
 
-if (-not (Test-Path "IIS:\Sites\MiSitio\api")) {
-    New-WebApplication -Site "MiSitio" -Name "api" -PhysicalPath $ApiDir -ApplicationPool "DefaultAppPool" | Out-Null
-    Write-Log "Aplicacion /api creada en MiSitio."
-} else {
-    Write-Log "Aplicacion /api ya existe."
-}
+    $apiScripts = @("ad-user-service.ps1", "create-user.ps1", "web.config")
+    foreach ($file in $apiScripts) {
+        $src = Join-Path $RepoDir "scripts\$file"
+        if (Test-Path $src) {
+            Copy-Item -Path $src -Destination $ApiDir -Force
+            Write-Log "  $file copiado a $ApiDir"
+        } else {
+            Write-Log "ADVERTENCIA: No se encontro $file en el repositorio."
+        }
+    }
 
-Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/anonymousAuthentication -Name enabled -Value False -Location "MiSitio/api"
-Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/windowsAuthentication -Name enabled -Value True -Location "MiSitio/api"
-Write-Log "Autenticacion Windows habilitada en /api (Anonymous deshabilitado)."
+    if (-not (Test-Path "IIS:\Sites\MiSitio\api")) {
+        New-WebApplication -Site "MiSitio" -Name "api" -PhysicalPath $ApiDir -ApplicationPool "DefaultAppPool" | Out-Null
+        Write-Log "Aplicacion /api creada en MiSitio."
+    } else {
+        Write-Log "Aplicacion /api ya existe."
+    }
 
-if (-not (Test-Path $LogsDir)) {
-    New-Item -Path $LogsDir -ItemType Directory -Force | Out-Null
+    Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/anonymousAuthentication -Name enabled -Value False -Location "MiSitio/api"
+    Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/windowsAuthentication -Name enabled -Value True -Location "MiSitio/api"
+    Write-Log "Autenticacion Windows habilitada en /api (Anonymous deshabilitado)."
+
+    if (-not (Test-Path $LogsDir)) {
+        New-Item -Path $LogsDir -ItemType Directory -Force | Out-Null
+    }
+    $auditLog = "$LogsDir\ad-user-audit.log"
+    if (-not (Test-Path $auditLog)) {
+        New-Item -Path $auditLog -ItemType File -Force | Out-Null
+    }
+    icacls $LogsDir /grant "IIS_IUSRS:(OI)(CI)M" 2>$null | Out-Null
+    icacls $LogsDir /grant "IUSR:(OI)(CI)M" 2>$null | Out-Null
+    Write-Log "Directorio de logs y permisos configurados."
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo configurar la API AD: $($_.Exception.Message)"
 }
-$auditLog = "$LogsDir\ad-user-audit.log"
-if (-not (Test-Path $auditLog)) {
-    New-Item -Path $auditLog -ItemType File -Force | Out-Null
-}
-icacls $LogsDir /grant "IIS_IUSRS:(OI)(CI)M" 2>$null | Out-Null
-icacls $LogsDir /grant "IUSR:(OI)(CI)M" 2>$null | Out-Null
-Write-Log "Directorio de logs y permisos configurados."
 
 # ------------------------------------------------------------------
 # 8. Generar ad-users.json

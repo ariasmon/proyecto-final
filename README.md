@@ -221,7 +221,7 @@ Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
 route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
 ```
 
-5. **Acceso RDP:** El servicio de Escritorio Remoto (RDP) se habilita automáticamente tras la promoción a Domain Controller mediante el script `bootstrap-windows.ps1`, que configura `fDenyTSConnections=0`, establece `UserAuthentication=1` y crea una regla de firewall para el puerto 3389/TCP.
+5. **Acceso RDP:** El servicio de Escritorio Remoto (RDP) se habilita automáticamente antes y después de la promoción a Domain Controller mediante el script `bootstrap-windows.ps1`, que configura `fDenyTSConnections=0`, establece `UserAuthentication=1` y crea una regla de firewall para el puerto 3389/TCP.
 
 ### 4.4. Implementación del Controlador de Dominio (Active Directory)
 
@@ -1833,16 +1833,18 @@ CloudFormation
          ├─ Descargar bootstrap-windows.ps1 desde GitHub
          └─ Ejecutar bootstrap-windows.ps1
               │
-              ├── [ESTADO 0] AD DS no instalado
-              │    ├─ Instalar Git, features, Windows Exporter
-              │    ├─ Montar disco backup + tarea semanal
-              │    ├─ Clonar repositorio
-              │    ├─ Registrar ScheduledTask para post-reboot
-              │    └─ Promocionar a DC → REBOOT
-              │
-              └── [ESTADO 1] AD DS instalado (tras reboot)
-                   ├─ DNS forwarders + ajuste DNS adaptador
-                   ├─ Crear OUs y grupos de seguridad
+               ├── [ESTADO 0] AD DS no instalado
+               │    ├─ Instalar Git, features, Windows Exporter
+               │    ├─ Montar disco backup + tarea semanal
+               │    ├─ Clonar repositorio
+               │    ├─ Registrar ScheduledTask para post-reboot
+               │    ├─ Habilitar RDP
+               │    └─ Promocionar a DC → REBOOT
+               │
+               └── [ESTADO 1] AD DS instalado (tras reboot)
+                    ├─ DNS forwarders + ajuste DNS adaptador
+                    ├─ Habilitar RDP
+                    ├─ Crear OUs y grupos de seguridad
                    ├─ Instalar Sysmon
                    ├─ Desplegar IIS (MiSitio) + contenido web
                    ├─ Configurar API /api + autenticación Windows
@@ -1941,7 +1943,8 @@ El script detecta que el rol AD DS no está instalado y ejecuta las acciones de 
 | 5 | Tarea backup semanal | `Backup-AD-Semanal`: domingo 03:00, `wbadmin systemstatebackup` |
 | 6 | Clonar repositorio | `C:\tfg-despliegue` desde GitHub |
 | 7 | Registrar ScheduledTask | `TFG-Bootstrap` con trigger `AtStartup` para continuar tras el reboot |
-| 8 | Promocionar a DC | `Install-ADDSForest` con dominio `tfg.vp` → reboot automático |
+| 8 | Habilitar RDP | Configurar `fDenyTSConnections=0`, `UserAuthentication=1`, servicio TermService, regla firewall 3389/TCP |
+| 9 | Promocionar a DC | `Install-ADDSForest` con dominio `tfg.vp` → reboot automático |
 
 #### Fase 2: Bootstrap Windows Server — Estado 1 (AD DS instalado, tras reboot)
 
@@ -1951,6 +1954,7 @@ Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Bootstr
 |------|--------|---------|
 | 1 | DNS forwarders | `8.8.8.8` y `8.8.4.4` en el servidor DNS de AD |
 | 2 | DNS del adaptador | Cambiar a `127.0.0.1` + `8.8.8.8` (AD DNS ya disponible) |
+| 2b | Habilitar RDP | Verificar `fDenyTSConnections=0`, servicio TermService y regla firewall 3389/TCP |
 | 3 | Estructura de OUs | `Usuarios`, `Equipos`, `Servidores`, `Grupos`, `Admins` bajo `DC=tfg,DC=vp` |
 | 4 | Grupos de seguridad | `GG_Usuarios`, `GG_Admins`, `GG_Portal-AD-Admins` en `OU=Grupos,DC=tfg,DC=vp` |
 | 5 | Instalar Sysmon | Con `sysmonconfig.xml` del repositorio clonado |
@@ -1997,6 +2001,7 @@ El script es seguro ejecutarlo múltiples veces:
 | **Windows Server** | | |
 | Red estática + ruta VPN | ✅ | |
 | Firewall desactivado | ✅ | |
+| RDP (habilitación) | ✅ | |
 | Windows Exporter | ✅ | |
 | Volumen backup + tarea semanal | ✅ | |
 | Active Directory (promoción a DC) | ✅ | |
