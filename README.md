@@ -114,7 +114,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 ### 3.2. Diseño de Seguridad y Accesos
 
 1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
-2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde `172.16.3.0/24`, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -220,6 +220,8 @@ Para garantizar la estabilidad operativa y la conectividad a través del Gateway
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
 route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
 ```
+
+5. **Acceso RDP:** El servicio de Escritorio Remoto (RDP) se habilita automáticamente tras la promoción a Domain Controller mediante el script `bootstrap-windows.ps1`, que configura `fDenyTSConnections=0`, establece `UserAuthentication=1` y crea una regla de firewall para el puerto 3389/TCP.
 
 ### 4.4. Implementación del Controlador de Dominio (Active Directory)
 
@@ -547,7 +549,7 @@ WindowsInternal:
         </powershell>
 ```
 
-El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.20). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
+El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, RDP, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.20). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
 
 ### 4.7. Implementación de VPN con WireGuard
 
@@ -565,6 +567,7 @@ Para permitir el acceso remoto seguro de usuarios a la infraestructura desde fue
 La configuración permite que los clientes VPN accedan a:
 - **Subred privada** (`10.0.2.0/24`): Windows Server, Active Directory y otros recursos internos
 - **Subred VPN** (`172.16.3.0/24`): Comunicación entre clientes conectados
+- **Internet**: Todo el tráfico de los clientes VPN se natetea a través del Gateway Ubuntu
 
 #### Instalación del servidor WireGuard
 
@@ -599,6 +602,9 @@ Se han añadido las siguientes reglas iptables para permitir el tráfico VPN y e
 ```bash
 # NAT para tráfico VPN hacia la subred privada
 sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
+
+# NAT para que clientes VPN accedan a Internet
+sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
 
 # Forwarding entre VPN y subred privada
 sudo iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT

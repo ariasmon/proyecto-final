@@ -48,7 +48,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 1. Instalar Git for Windows
     # ------------------------------------------------------------------
-    Write-Log "[1/8] Instalando Git for Windows..."
+    Write-Log "[1/9] Instalando Git for Windows..."
     $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
     $gitInstaller = "C:\Git-installer.exe"
     Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
@@ -59,7 +59,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 2. Instalar features
     # ------------------------------------------------------------------
-    Write-Log "[2/8] Instalando roles y features..."
+    Write-Log "[2/9] Instalando roles y features..."
     Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
     Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
     Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
@@ -67,7 +67,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 3. Instalar Windows Exporter
     # ------------------------------------------------------------------
-    Write-Log "[3/8] Instalando Windows Exporter..."
+    Write-Log "[3/9] Instalando Windows Exporter..."
     $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
     Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
     msiexec /i C:\windows_exporter.msi ENABLED_COLLECTORS="cpu,memory,logical_disk,net,os,system" /qn | Out-Null
@@ -77,7 +77,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 4. Esperar y montar disco de backup
     # ------------------------------------------------------------------
-    Write-Log "[4/8] Esperando disco de backup (max 5 min)..."
+    Write-Log "[4/9] Esperando disco de backup (max 5 min)..."
     $elapsed = 0
     $maxWait = 300
     $diskReady = $false
@@ -105,16 +105,16 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 5. Tarea programada de backup semanal
     # ------------------------------------------------------------------
     if ($diskReady) {
-        Write-Log "[5/8] Creando tarea de backup semanal..."
+        Write-Log "[5/9] Creando tarea de backup semanal..."
         schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM 2>$null | Out-Null
     } else {
-        Write-Log "[5/8] Omitiendo tarea de backup (disco no disponible)"
+        Write-Log "[5/9] Omitiendo tarea de backup (disco no disponible)"
     }
 
     # ------------------------------------------------------------------
     # 6. Clonar repositorio
     # ------------------------------------------------------------------
-    Write-Log "[6/8] Clonando repositorio..."
+    Write-Log "[6/9] Clonando repositorio..."
     if (Test-Path $RepoDir) {
         Write-Log "Repositorio ya existe, actualizando..."
         & git -C $RepoDir pull origin main 2>&1 | ForEach-Object { Write-Log $_ }
@@ -125,7 +125,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 7. Crear ScheduledTask para post-reboot
     # ------------------------------------------------------------------
-    Write-Log "[7/8] Registrando tarea TFG-Bootstrap para post-reboot..."
+    Write-Log "[7/9] Registrando tarea TFG-Bootstrap para post-reboot..."
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\bootstrap-windows.ps1"
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -133,9 +133,21 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     Register-ScheduledTask -TaskName "TFG-Bootstrap" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 
     # ------------------------------------------------------------------
-    # 8. Promocionar a Domain Controller
+    # 8. Habilitar RDP antes de promocion a DC
     # ------------------------------------------------------------------
-    Write-Log "[8/8] Promocionando a Domain Controller ($DomainName)..."
+    Write-Log "[8/9] Habilitando RDP antes de promocion a DC..."
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+    Start-Service TermService -ErrorAction SilentlyContinue
+    Set-Service -Name TermService -StartupType Automatic
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+    Write-Log "RDP habilitado."
+
+    # ------------------------------------------------------------------
+    # 9. Promocionar a Domain Controller
+    # ------------------------------------------------------------------
+    Write-Log "[9/9] Promocionando a Domain Controller ($DomainName)..."
     Import-Module ADDSDeployment
 
     Install-ADDSForest `
@@ -179,6 +191,17 @@ if ($adapter) {
     Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1", "8.8.8.8")
     Write-Log "DNS del adaptador actualizado."
 }
+
+# ------------------------------------------------------------------
+# 2b. Habilitar y configurar RDP
+# ------------------------------------------------------------------
+Write-Log "[2b/11] Habilitando RDP..."
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+Start-Service TermService
+Set-Service -Name TermService -StartupType Automatic
+New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow | Out-Null
+Write-Log "RDP habilitado y configurado."
 
 # ------------------------------------------------------------------
 # 3. Crear estructura de OUs

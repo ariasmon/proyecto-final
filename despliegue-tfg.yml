@@ -114,6 +114,10 @@ Resources:
           ToPort: -1
           SourceSecurityGroupId: !Ref SGGateway
         - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 172.16.3.0/24
+        - IpProtocol: tcp
           FromPort: 53
           ToPort: 53
           SourceSecurityGroupId: !Ref SGGateway

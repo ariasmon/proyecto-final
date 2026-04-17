@@ -176,6 +176,12 @@ if ! iptables -t nat -C POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERAD
     netfilter-persistent save
 fi
 
+# Asegurar que la regla MASQUERADE VPN para Internet existe
+if ! iptables -t nat -C POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE 2>/dev/null; then
+    iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
+    netfilter-persistent save
+fi
+
 # ============================================================================
 # PASO 11: Habilitar e iniciar servicios
 # ============================================================================
