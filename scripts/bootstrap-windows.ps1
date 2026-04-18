@@ -5,7 +5,7 @@ param(
     [SecureString]$SafeModePassword
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $LogFile = "C:\tfg-bootstrap.log"
 $MarkerFile = "C:\tfg-bootstrap-done"
 $RepoDir = "C:\tfg-despliegue"
@@ -93,7 +93,14 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 4. Esperar y montar disco de backup
     # ------------------------------------------------------------------
-    Write-Log "[4/9] Esperando disco de backup (máx 5 min)..."
+    Write-Log "[4/9] Buscando disco de backup (máx 5 min)..."
+    Write-Log "Enumerando todos los discos del sistema..."
+    $allDisks = Get-Disk
+    Write-Log "Total de discos detectados: $($allDisks.Count)"
+    foreach ($d in $allDisks) {
+        Write-Log "  Disco $($d.Number): Status=$($d.OperationalStatus), PartitionStyle=$($d.PartitionStyle), Size=$([math]::Round($d.Size/1GB, 2))GB"
+    }
+    
     $elapsed = 0
     $maxWait = 300
     $diskReady = $false
@@ -101,6 +108,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
         try {
             # Buscar discos Offline + Online sin letra de unidad asignada
             # Esto detecta discos "Not initialized" (Offline) y discos Online sin particiones
+            Write-Log "Buscando disco sin inicializar o sin letra asignada..."
             $disk = Get-Disk | Where-Object { 
                 $_.OperationalStatus -eq 'Offline' -or 
                 $_.OperationalStatus -eq 'Online' 
@@ -110,7 +118,8 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
             } | Select-Object -First 1
 
             if ($disk) {
-                Write-Log "Disco de backup detectado, inicializando..."
+                Write-Log ">>> Disco encontrado: Num=$($disk.Number), Status=$($disk.OperationalStatus), PartitionStyle=$($disk.PartitionStyle)"
+                Write-Log "Inicializando disco..."
                 try {
                     # Si el disco está sin inicializar (RAW o Offline), inicializarlo con MBR
                     if ($disk.PartitionStyle -eq 'RAW') {
@@ -121,19 +130,21 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
                     Write-Log "Creando volumen simple..."
                     $partition = New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter E -ErrorAction Stop
                     # Formatear como NTFS con etiqueta Backup
-                    Write-Log "Formateando disco..."
+                    Write-Log "Formateando disco como NTFS..."
                     Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force -ErrorAction Stop | Out-Null
                     $diskReady = $true
-                    Write-Log "Disco de backup configurado correctamente (E:\)"
+                    Write-Log ">>>> Disco de backup configurado correctamente (E:\)"
                     break
                 } catch {
                     Write-Log "ERROR al configurar disco: $($_.Exception.Message)"
                 }
+            } else {
+                Write-Log "No se encontró disco sin inicializar en este ciclo"
             }
         } catch {
             Write-Log "ADVERTENCIA: Error al procesar disco de backup: $($_.Exception.Message)"
         }
-        Write-Log "Disco no disponible, esperando... ($elapsed/$maxWait s)"
+        Write-Log "Esperando... ($elapsed/$maxWait s)"
         Start-Sleep -Seconds 10
         $elapsed += 10
     }
