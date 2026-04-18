@@ -14,6 +14,9 @@ $ApiDir = "$SiteDir\api"
 $LogsDir = "$SiteDir\logs"
 $GitHubRepo = "https://github.com/ariasmon/proyecto-final.git"
 
+# Forzar creacion del archivo de log inmediatamente
+"Log inicializado: $(Get-Date)" | Out-File -FilePath $LogFile -Encoding UTF8
+
 function Write-Log {
     param([string]$Message)
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -34,6 +37,9 @@ Write-Log "=============================================="
 # ============================================================================
 # ESTADO 0: AD DS no instalado -> Primer arranque
 # ============================================================================
+# Importar modulo ServerManager para evitar errores
+Import-Module ServerManager -ErrorAction SilentlyContinue
+
 if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
 
     # Validar contraseña solo en primer arranque (necesaria para promoción a DC)
@@ -229,7 +235,12 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
 # ============================================================================
 # ESTADO 1: AD DS ya instalado -> Segundo arranque (post-reinicio)
 # ============================================================================
+# Importar modulo ServerManager para evitar errores
+Import-Module ServerManager -ErrorAction SilentlyContinue
+
+Write-Log "=============================================="
 Write-Log "[ESTADO 1] Segundo arranque - configurando AD, IIS, API..."
+Write-Log "Modulo ServerManager importado"
 
 # ------------------------------------------------------------------
 # 0. Detectar e inicializar disco de backup (si existe y no está configurado)
