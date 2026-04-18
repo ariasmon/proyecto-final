@@ -173,16 +173,89 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           <powershell>
-          Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+          $ErrorActionPreference = "Continue"
+          $logFile = "C:\userdata-debug.log"
+
+          function Write-UDLog {
+              param([string]$Message)
+              $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+              $line = "[$ts] $Message"
+              Write-Host $line
+              $line | Out-File -FilePath $logFile -Append -Encoding UTF8
+          }
+
+          Write-UDLog "=========================================="
+          Write-UDLog "UserData INICIANDO"
+          Write-UDLog "=========================================="
+
+          Write-UDLog "[1/7] Deshabilitando Firewall..."
+          try {
+              Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+              Write-UDLog "Firewall deshabilitado OK"
+          } catch {
+              Write-UDLog "ERROR Firewall: $($_.Exception.Message)"
+          }
+
+          Write-UDLog "[2/7] Obteniendo adaptador de red..."
           $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
-          $ifIndex = $adapter.ifIndex
-          Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
-          New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
-          Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
-          route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
-          $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
-          powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
+          if ($adapter) {
+              $ifIndex = $adapter.ifIndex
+              Write-UDLog "Adaptador: $($adapter.Name) - ifIndex: $ifIndex"
+          } else {
+              Write-UDLog "ERROR: No se encontro adaptador de red activo"
+          }
+
+          Write-UDLog "[3/7] Configurando IP estatica 10.0.2.75..."
+          try {
+              Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
+              New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
+              Write-UDLog "IP configurada OK"
+          } catch {
+              Write-UDLog "ERROR IP: $($_.Exception.Message)"
+          }
+
+          Write-UDLog "[4/7] Configurando DNS..."
+          try {
+              Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
+              Write-UDLog "DNS configurado OK"
+          } catch {
+              Write-UDLog "ERROR DNS: $($_.Exception.Message)"
+          }
+
+          Write-UDLog "[5/7] Configurando ruta VPN 172.16.3.0/24..."
+          try {
+              route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
+              Write-UDLog "Ruta VPN OK"
+          } catch {
+              Write-UDLog "ERROR VPN route: $($_.Exception.Message)"
+          }
+
+          Write-UDLog "[6/7] Descargando bootstrap-windows.ps1..."
+          try {
+              Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
+              $scriptSize = (Get-Item "C:\bootstrap-windows.ps1").Length
+              Write-UDLog "Script descargado OK - Size: $scriptSize bytes"
+          } catch {
+              Write-UDLog "ERROR descarga: $($_.Exception.Message)"
+          }
+
+          Write-UDLog "[7/7] Ejecutando bootstrap..."
+          try {
+              if ((Test-Path "C:\bootstrap-windows.ps1") -and ((Get-Item "C:\bootstrap-windows.ps1").Length -gt 1000)) {
+                  Write-UDLog "Script verificado, ejecutando..."
+                  $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
+                  powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
+                  Write-UDLog "Bootstrap ejecutado OK"
+              } else {
+                  Write-UDLog "ERROR: Script no existe o esta vacio"
+              }
+          } catch {
+              Write-UDLog "ERROR bootstrap: $($_.Exception.Message)"
+          }
+
+          Write-UDLog "=========================================="
+          Write-UDLog "UserData FINALIZADO"
+          Write-UDLog "=========================================="
           </powershell>
 
   BackupVolume:
