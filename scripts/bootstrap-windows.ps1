@@ -197,6 +197,56 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
 Write-Log "[ESTADO 1] Segundo arranque - configurando AD, IIS, API..."
 
 # ------------------------------------------------------------------
+# 0. Instalar Git y clonar repositorio (si no existen)
+# ------------------------------------------------------------------
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    try {
+        Write-Log "[0/11] Instalando Git for Windows..."
+        $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
+        $gitInstaller = "C:\Git-installer.exe"
+        Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
+        Start-Process -FilePath $gitInstaller -ArgumentList "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=gitlfs" -NoNewWindow -Wait
+        Remove-Item $gitInstaller -ErrorAction SilentlyContinue
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        Write-Log "Git instalado correctamente."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo instalar Git: $($_.Exception.Message)"
+    }
+}
+
+if (-not (Test-Path $RepoDir)) {
+    try {
+        Write-Log "[0/11] Clonando repositorio..."
+        & git clone $GitHubRepo $RepoDir 2>&1 | ForEach-Object { Write-Log $_ }
+        Write-Log "Repositorio clonado."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo clonar el repositorio: $($_.Exception.Message)"
+    }
+} else {
+    Write-Log "Repositorio ya existe, actualizando..."
+    & git -C $RepoDir pull origin main 2>&1 | ForEach-Object { Write-Log $_ }
+}
+
+# ------------------------------------------------------------------
+# 0b. Instalar Windows Exporter (si no esta instalado)
+# ------------------------------------------------------------------
+if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
+    try {
+        Write-Log "[0b/11] Instalando Windows Exporter..."
+        $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
+        Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i C:\windows_exporter.msi ENABLED_COLLECTORS=`"cpu,memory,logical_disk,net,os,system`" /qn" -NoNewWindow -Wait
+        Remove-Item C:\windows_exporter.msi -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName "Windows Exporter" -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+        Write-Log "Windows Exporter instalado."
+    } catch {
+        Write-Log "ADVERTENCIA: No se pudo instalar Windows Exporter: $($_.Exception.Message)"
+    }
+} else {
+    Write-Log "Windows Exporter ya instalado, omitiendo."
+}
+
+# ------------------------------------------------------------------
 # 1. Configurar DNS forwarders
 # ------------------------------------------------------------------
 Write-Log "[1/11] Configurando DNS forwarders..."
