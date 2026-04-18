@@ -22,7 +22,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos (Active Directory).
 * **Active Directory:** Despliegue de dominio Windows para gestión centralizada de identidades.
 * **VPN (WireGuard):** Configuración de túnel VPN para acceso remoto seguro de usuarios al dominio.
-* **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía VPN WireGuard).
+* **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía VPN WireGuard y DNAT desde Internet).
 * **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway.
 
 ### 1.3. Recursos identificados
@@ -38,7 +38,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 ### 1.4. Restricciones y condicionantes
 
 * **Económicas:** Viabilidad dentro de la capa gratuita (Free Tier) de AWS siempre que sea posible.
-* **Seguridad:** Administración a través de puertos estándar (22 y 51820) protegidos por Security Groups. RDP solo accesible vía VPN.
+* **Seguridad:** Administración a través de puertos estándar (22 y 51820) protegidos por Security Groups. RDP accesible tanto por VPN como mediante DNAT desde Internet.
 * **Plazos:** Despliegue funcional antes de la fecha de defensa del TFG.
 
 ### 1.5. Cronograma preliminar
@@ -94,7 +94,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 | Recurso | Admin Sistemas | Admin Dominio | Usuario Corp. | Operador |
 |---------|---------------|---------------|---------------|----------|
 | SSH Gateway | ✓ | - | - | ✓ |
-| RDP Windows (vía VPN) | ✓ | ✓ | - | - |
+| RDP Windows (vía VPN o DNAT) | ✓ | ✓ | - | - |
 | VPN | ✓ | ✓ | ✓ | - |
 | Grafana (vía VPN) | ✓ | - | - | ✓ |
 | Dominio AD | ✓ | ✓ | ✓ | - |
@@ -1212,6 +1212,12 @@ Durante el despliegue de la infraestructura se encontraron y resolvieron diversa
 | Alertmanager versión antigua | La versión 0.23.0 no soportaba `telegram_configs` | Actualizar a versión 0.28.1 manualmente | Marzo |
 | Discord no disponible | El proyecto alertmanager-discord no tiene releases precompilados disponibles, por lo que la integración con Discord no se implementó | Documentado como mejora futura (telegram como canal principal) | Marzo |
 | Clientes VPN no conectan con AD | La subred VPN original (`10.0.3.0/24`) estaba dentro del CIDR de la VPC (`10.0.0.0/16`), impidiendo que AWS enrutara tráfico de respuesta hacia clientes VPN | Cambiar subred VPN a `172.16.3.0/24` (fuera del CIDR de la VPC), añadir ruta VPN en RouteTable privada, reglas iptables de forwarding y NAT VPN→subred privada | Abril |
+| DNS no resuelve en Windows UserData | Ni `8.8.8.8` ni el Gateway estaban disponibles cuando Windows arranca, porque CloudFormation crea instancias en paralelo | Cambiar DNS a `10.0.0.2` (AWS DNS, disponible sin Gateway) y adoptar estrategia Stage0/Stage2: UserData solo hace tareas locales, ScheduledTask post-reboot descarga el script | Abril |
+| CloudFormation UserData excede 25600 bytes | El script `bootstrap-windows.ps1` incrustado en el UserData superaba el límite de CloudFormation | Mover la lógica completa del bootstrap a un archivo externo en GitHub; UserData solo configura red, instala roles locales y crea ScheduledTask que descarga el script tras reboot | Abril |
+| DNAT con IP elástica no funciona | Las reglas DNAT que usan la IP elástica como destino no funcionan en AWS porque el Internet Gateway realiza NAT antes de que el tráfico llegue a iptables | Usar la IP privada del Gateway obtenida dinámicamente desde los metadatos de instancia (`169.254.169.254`) en las reglas DNAT | Abril |
+| `New-ScheduledTaskTrigger -RepetitionInterval` cuelga en Server 2022 | El cmdlet `New-ScheduledTaskTrigger` con `-RepetitionInterval` puede causar un hang indefinido en Windows Server 2022 | Cambiar a `-Daily -At "03:00AM"` para la tarea de exportación de usuarios | Abril |
+| El disco EBS no se inicializa automáticamente | El volumen EBS aparece en Disk Manager como "Not initialized" (estado RAW) pero el script busca solo discos Online | Implementar detección de discos RAW/Offline en ESTADO 1 del bootstrap: busca discos sin inicializar, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup" | Abril |
+| Stage2 no ejecuta el script automáticamente | Stage2 pasa SafeModePassword que causa problemas cuando se ejecuta en segundo plano (cuenta SYSTEM) | Eliminar el parámetro `-SafeModePassword` de la llamada de Stage2, ya que en ESTADO 1 (post-reboot) no es necesario | Abril |
 
 #### Lecciones aprendidas
 
@@ -1659,11 +1665,11 @@ El script realiza las siguientes acciones:
 
 Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
 
-> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización de la unidad `E:`, la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` (véase la sección 4.20). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
+> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup"), la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.20). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
 
 #### Prerrequisito: volumen de backup
 
-El volumen de backup se crea automáticamente al desplegar el stack de CloudFormation. No obstante, si es necesario crearlo manualmente:
+El volumen de backup se crea automáticamente al desplegar el stack de CloudFormation. El script `bootstrap-windows.ps1` lo detecta automáticamente y lo configura:
 
 ##### Creación del volumen en AWS
 
@@ -1827,30 +1833,37 @@ CloudFormation
     │         ├─ Provisioning Grafana (datasource + dashboards)
     │         └─ Marcador /etc/tfg-bootstrap-done → FIN
     │
-    └─ UserData (Windows Server)
-         ├─ Configurar red estática (IP, GW, DNS 8.8.8.8, ruta VPN)
-         ├─ Desactivar firewall
-         ├─ Descargar bootstrap-windows.ps1 desde GitHub
-         └─ Ejecutar bootstrap-windows.ps1
-              │
-               ├── [ESTADO 0] AD DS no instalado
-               │    ├─ Instalar Git, features, Windows Exporter
-               │    ├─ Montar disco backup + tarea semanal
-               │    ├─ Clonar repositorio
-               │    ├─ Registrar ScheduledTask para post-reboot
-               │    ├─ Habilitar RDP
-               │    └─ Promocionar a DC → REBOOT
+└─ UserData (Windows Server) [STAGE 0]
+          ├─ Configurar red estática (IP, GW, DNS 10.0.0.2, ruta VPN)
+          ├─ Instalar roles (AD DS, IIS, Backup)
+          ├─ Habilitar RDP
+          ├─ Crear ScheduledTask TFG-Stage2 (post-reboot)
+          └─ Promocionar a DC → REBOOT
                │
-               └── [ESTADO 1] AD DS instalado (tras reboot)
-                    ├─ DNS forwarders + ajuste DNS adaptador
-                    ├─ Habilitar RDP
-                    ├─ Crear OUs y grupos de seguridad
-                   ├─ Instalar Sysmon
-                   ├─ Desplegar IIS (MiSitio) + contenido web
-                   ├─ Configurar API /api + autenticación Windows
-                   ├─ Generar ad-users.json + tarea exportación
-                   ├─ Eliminar ScheduledTask de bootstrap
-                   └─ Crear marcador C:\tfg-bootstrap-done → FIN
+               └─ [STAGE 2] TFG-Stage2 (post-reboot)
+                    ├─ Esperar DNS (máx 5 min)
+                    ├─ Descargar bootstrap-windows.ps1 desde GitHub
+                    └─ Ejecutar bootstrap-windows.ps1
+                         │
+                          ├── [ESTADO 0] AD DS no instalado
+                          │    ├─ Instalar Git, features, Windows Exporter
+                          │    ├─ Clonar repositorio
+                          │    ├─ Registrar ScheduledTask para post-reboot
+                          │    ├─ Habilitar RDP
+                          │    └─ Promocionar a DC → REBOOT
+                          │
+                          └── [ESTADO 1] AD DS instalado (tras reboot)
+                               ├─ Detectar e inicializar disco de backup (RAW → MBR)
+                               ├─ Montar disco backup + tarea semanal
+                               ├─ DNS forwarders + ajuste DNS adaptador
+                               ├─ Habilitar RDP
+                               ├─ Crear OUs y grupos de seguridad
+                               ├─ Instalar Sysmon
+                               ├─ Desplegar IIS (MiSitio) + contenido web
+                               ├─ Configurar API /api + autenticación Windows
+                               ├─ Generar ad-users.json + tarea exportación
+                               ├─ Eliminar ScheduledTasks de bootstrap
+                               └─ Crear marcador C:\tfg-bootstrap-done → FIN
 ```
 
 #### Fase 1: CloudFormation — Parámetros del stack
@@ -1893,13 +1906,18 @@ Los UserData de ambos servidores en `despliegue-tfg.yml` se limitan a la configu
 
 Las reglas de iptables se configuran en el UserData porque son necesarias para que la red funcione antes de que el bootstrap instale nada.
 
-**Windows Server:**
+**Windows Server (Stage0 - código mínimo embebido):**
 
 ```powershell
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
-# IP estática + Gateway + DNS 8.8.8.8 + ruta VPN
-# Descargar + ejecutar bootstrap-windows.ps1
+# IP estática + Gateway + DNS 10.0.0.2 (AWS DNS) + ruta VPN
+# Instalar roles (AD DS, IIS, Backup)
+# Habilitar RDP
+# Crear ScheduledTask TFG-Stage2 (post-reboot: espera DNS, descarga bootstrap)
+# Promocionar a Domain Controller -> reinicio automático
 ```
+
+> **Estrategia Stage0/Stage2:** El UserData del Windows Server se divide en dos fases. El Stage0 se ejecuta en el primer arranque sin dependencia de DNS externo: configura la red, instala roles locales, habilita RDP y crea una tarea programada TFG-Stage2. A continuación, promociona el servidor a DC, lo que provoca un reinicio automático. Tras el reinicio, la tarea TFG-Stage2 espera a que DNS esté disponible (hasta 30 intentos de 10 segundos), descarga `bootstrap-windows.ps1` desde GitHub y lo ejecuta. Esta estrategia resuelve el problema de que CloudFormation crea las instancias en paralelo y el Windows Server puede arrancar antes de que el Gateway esté listo para proporcionar NAT y DNS.
 
 | UserData | ¿Por qué mínimo? |
 |----------|-------------------|
@@ -1948,10 +1966,11 @@ El script detecta que el rol AD DS no está instalado y ejecuta las acciones de 
 
 #### Fase 2: Bootstrap Windows Server — Estado 1 (AD DS instalado, tras reboot)
 
-Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Bootstrap` ejecuta el script de nuevo. Este detecta que AD DS ya está instalado y completa la configuración:
+Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Stage2` ejecuta el script de nuevo. Este detecta que AD DS ya está instalado y completa la configuración. **Importante:** El código de detección e inicialización del disco de backup se ejecuta en ESTADO 1, ya que Stage0 no tiene acceso a DNS y el volumen EBS puede estar en estado RAW (sin inicializar).
 
 | Paso | Acción | Detalle |
 |------|--------|---------|
+| 0 | Detectar e inicializar disco de backup | Detecta discos en estado RAW, Offline u Online sin letra. Ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup" |
 | 1 | DNS forwarders | `8.8.8.8` y `8.8.4.4` en el servidor DNS de AD |
 | 2 | DNS del adaptador | Cambiar a `127.0.0.1` + `8.8.8.8` (AD DNS ya disponible) |
 | 2b | Habilitar RDP | Verificar `fDenyTSConnections=0`, servicio TermService y regla firewall 3389/TCP |
