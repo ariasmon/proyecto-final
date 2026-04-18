@@ -182,6 +182,21 @@ if ! iptables -t nat -C POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE 2>/de
     netfilter-persistent save
 fi
 
+# Configurar DNAT para RDP (Windows) desde Internet
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -n "$PRIVATE_IP" ]; then
+    if ! iptables -t nat -C PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389 2>/dev/null; then
+        iptables -t nat -A PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+    fi
+    if ! iptables -t nat -C POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE 2>/dev/null; then
+        iptables -t nat -A POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE
+    fi
+    if ! iptables -C FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT 2>/dev/null; then
+        iptables -A FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT
+    fi
+    netfilter-persistent save
+fi
+
 # ============================================================================
 # PASO 11: Habilitar e iniciar servicios
 # ============================================================================

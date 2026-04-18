@@ -92,6 +92,10 @@ Resources:
           FromPort: 51820
           ToPort: 51820
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
         - IpProtocol: -1
           CidrIp: 10.0.2.0/24
         - IpProtocol: -1
@@ -117,6 +121,10 @@ Resources:
           FromPort: 3389
           ToPort: 3389
           CidrIp: 172.16.3.0/24
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          SourceSecurityGroupId: !Ref SGGateway
         - IpProtocol: tcp
           FromPort: 53
           ToPort: 53
@@ -149,6 +157,10 @@ Resources:
           iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
           iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
           iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+          PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+          iptables -t nat -A PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+          iptables -t nat -A POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE
+          iptables -A FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -y
           apt-get install -y iptables-persistent netfilter-persistent git
@@ -216,13 +228,30 @@ Resources:
 
           Write-UDLog "[4/7] Configurando DNS..."
           try {
-              Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
-              Write-UDLog "DNS configurado OK"
+              Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("10.0.1.1","8.8.8.8")
+              Write-UDLog "DNS configurado OK (Gateway como primario)"
           } catch {
               Write-UDLog "ERROR DNS: $($_.Exception.Message)"
           }
 
-          Write-UDLog "[5/7] Configurando ruta VPN 172.16.3.0/24..."
+          Write-UDLog "[5/7] Esperando resolucion DNS..."
+          $dnsResolved = $false
+          for ($i = 1; $i -le 30; $i++) {
+              try {
+                  [System.Net.Dns]::GetHostAddresses("raw.githubusercontent.com") | Out-Null
+                  $dnsResolved = $true
+                  Write-UDLog "DNS resuelto OK (intento $i)"
+                  break
+              } catch {
+                  Write-UDLog "Esperando DNS... (intento $i/30)"
+                  Start-Sleep -Seconds 10
+              }
+          }
+          if (-not $dnsResolved) {
+              Write-UDLog "ADVERTENCIA: DNS no resuelto tras 30 intentos, continuando de todas formas"
+          }
+
+          Write-UDLog "[6/7] Configurando ruta VPN 172.16.3.0/24..."
           try {
               route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
               Write-UDLog "Ruta VPN OK"
@@ -230,16 +259,25 @@ Resources:
               Write-UDLog "ERROR VPN route: $($_.Exception.Message)"
           }
 
-          Write-UDLog "[6/7] Descargando bootstrap-windows.ps1..."
-          try {
-              Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
-              $scriptSize = (Get-Item "C:\bootstrap-windows.ps1").Length
-              Write-UDLog "Script descargado OK - Size: $scriptSize bytes"
-          } catch {
-              Write-UDLog "ERROR descarga: $($_.Exception.Message)"
+          Write-UDLog "[7/7] Descargando bootstrap-windows.ps1..."
+          $downloaded = $false
+          for ($i = 1; $i -le 5; $i++) {
+              try {
+                  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
+                  $scriptSize = (Get-Item "C:\bootstrap-windows.ps1").Length
+                  Write-UDLog "Script descargado OK (intento $i) - Size: $scriptSize bytes"
+                  $downloaded = $true
+                  break
+              } catch {
+                  Write-UDLog "ERROR descarga (intento $i/5): $($_.Exception.Message)"
+                  Start-Sleep -Seconds 15
+              }
+          }
+          if (-not $downloaded) {
+              Write-UDLog "ERROR: No se pudo descargar el script tras 5 intentos"
           }
 
-          Write-UDLog "[7/7] Ejecutando bootstrap..."
+          Write-UDLog "[8/8] Ejecutando bootstrap..."
           try {
               if ((Test-Path "C:\bootstrap-windows.ps1") -and ((Get-Item "C:\bootstrap-windows.ps1").Length -gt 1000)) {
                   Write-UDLog "Script verificado, ejecutando..."
