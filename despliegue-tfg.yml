@@ -281,8 +281,7 @@ Resources:
               try {
                   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
                   Write-S2Log "Ejecutando bootstrap-windows.ps1..."
-                  $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
-                  powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
+                  powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1"
                   Write-S2Log "Bootstrap completado"
               } catch {
                   Write-S2Log "ERROR: $($_.Exception.Message)"
