@@ -17,7 +17,7 @@ FORWARD_DROPPED=$(iptables -L FORWARD -v -n 2>/dev/null | grep "LOG.*IPTables-Dr
 INPUT_DROPPED=${INPUT_DROPPED:-0}
 FORWARD_DROPPED=${FORWARD_DROPPED:-0}
 
-# Escribir metrica en formato Prometheus para textfile collector
+# Escribir métrica en formato Prometheus para textfile collector
 cat > "$TMP_FILE" <<EOF
 # HELP iptables_dropped_packets_total Total number of packets logged as dropped by iptables
 # TYPE iptables_dropped_packets_total counter

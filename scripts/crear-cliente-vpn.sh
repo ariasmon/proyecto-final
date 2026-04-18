@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# crear-cliente-vpn.sh - Genera configuracion cliente WireGuard
+# crear-cliente-vpn.sh - Genera configuración cliente WireGuard
 #
 
 set -e
@@ -11,7 +11,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 if [[ $# -lt 1 ]]; then
-    echo "Uso: $0 <nombre_cliente> [ip_elastica]"
+    echo "Uso: $0 <nombre_cliente> [ip_elástica]"
     exit 1
 fi
 
@@ -26,19 +26,19 @@ PRIVATE_SUBNET="10.0.2.0/24"
 
 mkdir -p "$CLIENTS_DIR"
 
-# Detectar IP elastica automaticamente si no se proporciona
+# Detectar IP elástica automáticamente si no se proporciona
 if [[ -z "$IP_ELASTICA" ]]; then
     IP_ELASTICA=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null)
     if [[ -z "$IP_ELASTICA" ]]; then
-        echo "Error: No se pudo detectar la IP elastica automaticamente."
+        echo "Error: No se pudo detectar la IP elástica automáticamente."
         exit 1
     fi
 fi
 
-# Leer clave publica del servidor WireGuard
+# Leer clave pública del servidor WireGuard
 SERVER_PUBKEY=$(cat "${WIREGUARD_DIR}/publickey" 2>/dev/null)
 if [[ -z "$SERVER_PUBKEY" ]]; then
-    echo "Error: No se encontro la clave publica del servidor."
+    echo "Error: No se encontró la clave pública del servidor."
     exit 1
 fi
 
@@ -51,7 +51,7 @@ else
 fi
 
 if [[ $CLIENT_IP -gt 254 ]]; then
-    echo "Error: Se ha alcanzado el limite de clientes VPN (253)."
+    echo "Error: Se ha alcanzado el límite de clientes VPN (253)."
     exit 1
 fi
 
@@ -70,7 +70,7 @@ wg set "$WG_INTERFACE" peer "$CLIENT_PUBLIC_KEY" allowed-ips "${CLIENT_ADDRESS}/
   echo "AllowedIPs = ${CLIENT_ADDRESS}/32"
 } >> "${WIREGUARD_DIR}/${WG_INTERFACE}.conf"
 
-# Generar archivo de configuracion del cliente
+# Generar archivo de configuración del cliente
 CONFIG_FILE="${CLIENTS_DIR}/${CLIENTE}.conf"
 
 cat > "$CONFIG_FILE" <<EOF
@@ -88,4 +88,4 @@ EOF
 
 chmod 600 "$CONFIG_FILE"
 
-echo "Cliente VPN $CLIENTE creado. Configuracion en $CONFIG_FILE"
+echo "Cliente VPN $CLIENTE creado. Configuración en $CONFIG_FILE"

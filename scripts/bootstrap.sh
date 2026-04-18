@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# bootstrap.sh - Configuracion completa del Gateway Ubuntu para TFG
+# bootstrap.sh - Configuración completa del Gateway Ubuntu para TFG
 #
 
 set -e
@@ -40,7 +40,7 @@ apt-get update -y
 apt-get upgrade -y
 
 # ============================================================================
-# PASO 2: Anadir repositorio oficial de Grafana
+# PASO 2: Añadir repositorio oficial de Grafana
 # ============================================================================
 echo "[2/13] Configurando repositorio de Grafana..."
 apt-get install -y apt-transport-https software-properties-common wget
@@ -94,18 +94,18 @@ else
 fi
 
 # ============================================================================
-# PASO 6: Copiar configs
+# PASO 6: Copiar configuraciones
 # ============================================================================
-echo "[6/13] Copiando configs..."
+echo "[6/13] Copiando configuraciones..."
 cp "$DEPLOY_DIR"/configs/prometheus.yml /etc/prometheus/prometheus.yml
 cp "$DEPLOY_DIR"/configs/alert_rules.yml /etc/prometheus/
 cp "$DEPLOY_DIR"/configs/alertmanager.yml /etc/prometheus/alertmanager.yml
 chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 
 # ============================================================================
-# PASO 7: Configurar tokens Telegram
+# PASO 7: Configurar tokens de Telegram
 # ============================================================================
-echo "[7/13] Configuracion de Telegram..."
+echo "[7/13] Configuración de Telegram..."
 
 if [[ -n "$BOT_TOKEN_PARAM" && -n "$CHAT_ID_PARAM" ]]; then
     sed -i "s/TU_BOT_TOKEN_AQUI/$BOT_TOKEN_PARAM/" /etc/prometheus/alertmanager.yml
@@ -119,17 +119,17 @@ else
 fi
 
 # ============================================================================
-# PASO 8: Configurar iptables-logging
+# PASO 8: Configurar registro (logging) de iptables
 # ============================================================================
-echo "[8/13] Configurando logging de iptables..."
+echo "[8/13] Configurando registro de logs de iptables..."
 cp "$DEPLOY_DIR"/scripts/iptables-logging.sh /opt/
 chmod +x /opt/iptables-logging.sh
 bash /opt/iptables-logging.sh
 
 # ============================================================================
-# PASO 9: Configurar iptables-metrics y Node Exporter textfile
+# PASO 9: Configurar métricas de iptables y Node Exporter textfile
 # ============================================================================
-echo "[9/13] Configurando metricas de iptables..."
+echo "[9/13] Configurando métricas de iptables..."
 cp "$DEPLOY_DIR"/scripts/iptables-metrics.sh /opt/
 chmod +x /opt/iptables-metrics.sh
 
@@ -162,10 +162,10 @@ Address = 172.16.3.1/24
 ListenPort = 51820
 PrivateKey = ${SERVER_PRIVATE_KEY}
 
-# Peers se anaden con crear-cliente-vpn.sh
+# Los pares (peers) se añaden con crear-cliente-vpn.sh
 EOF
 
-    echo "Configuracion WireGuard creada."
+    echo "Configuración WireGuard creada."
 else
     echo "WireGuard ya configurado, omitiendo."
 fi
@@ -216,9 +216,9 @@ systemctl enable --now wg-quick@wg0 2>/dev/null || systemctl start wg-quick@wg0
 echo "Servicios habilitados."
 
 # ============================================================================
-# PASO 12: Provisioning automatico de Grafana
+# PASO 12: Aprovisionamiento automático de Grafana
 # ============================================================================
-echo "[12/13] Configurando Grafana con provisioning automatico..."
+echo "[12/13] Configurando Grafana con aprovisionamiento automático..."
 
 mkdir -p /etc/grafana/provisioning/datasources
 mkdir -p /etc/grafana/provisioning/dashboards
@@ -232,12 +232,12 @@ cp "$DEPLOY_DIR"/configs/dashboard-WindowsServer-personal.json /etc/grafana/prov
 chown -R grafana:grafana /etc/grafana/provisioning
 chown -R grafana:grafana /var/lib/grafana/dashboards
 
-echo "Provisioning de Grafana configurado."
+echo "Aprovisionamiento de Grafana configurado."
 
 systemctl restart grafana-server
 
 # ============================================================================
-# PASO 13: Verificacion
+# PASO 13: Verificación
 # ============================================================================
 echo "[13/13] Verificando servicios..."
 echo ""
@@ -252,14 +252,14 @@ for service in $SERVICES; do
     if systemctl is-active --quiet $service; then
         echo "✓ $service"
     else
-        echo "✗ $service - FALLO"
+        echo "✗ $service - FALLÓ"
         ALL_OK=false
     fi
 done
 
 echo ""
 echo "Puertos en escucha:"
-ss -tlnp | grep -E "9090|9100|3000|9093|51820" || echo "(ninguno detected)"
+ss -tlnp | grep -E "9090|9100|3000|9093|51820" || echo "(ninguno detectado)"
 
 touch "$MARKER_FILE"
 

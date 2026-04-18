@@ -36,14 +36,14 @@ Write-Log "=============================================="
 # ============================================================================
 if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
 
-    # Validar contraseña solo en primer arranque (necesaria para promocion a DC)
+    # Validar contraseña solo en primer arranque (necesaria para promoción a DC)
     if (-not $SafeModePassword) {
-        Write-Host "ERROR: Debe proporcionar -SafeModePassword para la promocion a DC. Ejemplo:"
+        Write-Host "ERROR: Debe proporcionar -SafeModePassword para la promoción a DC. Ejemplo:"
         Write-Host "  .\bootstrap-windows.ps1 -SafeModePassword (ConvertTo-SecureString 'TuClave' -AsPlainText -Force)"
         exit 1
     }
 
-    Write-Log "[ESTADO 0] Primer arranque - preparando sistema antes de promocion a DC"
+    Write-Log "[ESTADO 0] Primer arranque - preparando sistema antes de promoción a DC"
 
     # ------------------------------------------------------------------
     # 1. Instalar Git for Windows
@@ -62,16 +62,16 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     }
 
     # ------------------------------------------------------------------
-    # 2. Instalar features
+    # 2. Instalar características (features)
     # ------------------------------------------------------------------
     try {
-        Write-Log "[2/9] Instalando roles y features..."
+        Write-Log "[2/9] Instalando roles y características..."
         Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
         Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
         Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
-        Write-Log "Roles y features instalados."
+        Write-Log "Roles y características instalados."
     } catch {
-        Write-Log "ERROR: No se pudieron instalar roles y features: $($_.Exception.Message)"
+        Write-Log "ERROR: No se pudieron instalar roles y características: $($_.Exception.Message)"
         exit 1
     }
 
@@ -93,7 +93,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 4. Esperar y montar disco de backup
     # ------------------------------------------------------------------
-    Write-Log "[4/9] Esperando disco de backup (max 5 min)..."
+    Write-Log "[4/9] Esperando disco de backup (máx 5 min)..."
     $elapsed = 0
     $maxWait = 300
     $diskReady = $false
@@ -114,7 +114,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
         $elapsed += 10
     }
     if (-not $diskReady) {
-        Write-Log "ADVERTENCIA: Disco de backup no detectado en 5 min. Se omitira el backup."
+        Write-Log "ADVERTENCIA: Disco de backup no detectado en 5 min. Se omitirá el backup."
     }
 
     # ------------------------------------------------------------------
@@ -147,7 +147,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 7. Crear ScheduledTask para post-reboot
     # ------------------------------------------------------------------
     try {
-        Write-Log "[7/9] Registrando tarea TFG-Bootstrap para post-reboot..."
+        Write-Log "[7/9] Registrando tarea TFG-Bootstrap para post-reinicio..."
         $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\bootstrap-windows.ps1"
         $trigger = New-ScheduledTaskTrigger -AtStartup
         $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -160,10 +160,10 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     }
 
     # ------------------------------------------------------------------
-    # 8. Habilitar RDP antes de promocion a DC
+    # 8. Habilitar RDP antes de promoción a DC
     # ------------------------------------------------------------------
     try {
-        Write-Log "[8/9] Habilitando RDP antes de promocion a DC..."
+        Write-Log "[8/9] Habilitando RDP antes de promoción a DC..."
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         Start-Service TermService -ErrorAction SilentlyContinue
@@ -187,12 +187,12 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
         -SafeModeAdministratorPassword $SafeModePassword `
         -Force
 
-    Write-Log "Promocion iniciada. El servidor se reiniciara automaticamente."
+    Write-Log "Promoción iniciada. El servidor se reiniciará automáticamente."
     exit 0
 }
 
 # ============================================================================
-# ESTADO 1: AD DS ya instalado -> Segundo arranque (post-reboot)
+# ESTADO 1: AD DS ya instalado -> Segundo arranque (post-reinicio)
 # ============================================================================
 Write-Log "[ESTADO 1] Segundo arranque - configurando AD, IIS, API..."
 
@@ -228,7 +228,7 @@ if (-not (Test-Path $RepoDir)) {
 }
 
 # ------------------------------------------------------------------
-# 0b. Instalar Windows Exporter (si no esta instalado)
+# 0b. Instalar Windows Exporter (si no está instalado)
 # ------------------------------------------------------------------
 if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
     try {
@@ -349,7 +349,7 @@ try {
                 Invoke-WebRequest -Uri $fallbackUrl -OutFile $configPath -UseBasicParsing
                 Write-Log "sysmonconfig.xml descargado desde GitHub."
             } catch {
-                Write-Log "ADVERTENCIA: No se pudo descargar sysmonconfig.xml, usando config basica."
+                Write-Log "ADVERTENCIA: No se pudo descargar sysmonconfig.xml, usando config básica."
                 @"
 <SysmonSchema xmlns="http://schemas.microsoft.com/sysmon/2016/09/schema">
 <Schemas>
@@ -417,20 +417,20 @@ try {
             Copy-Item -Path $src -Destination $ApiDir -Force
             Write-Log "  $file copiado a $ApiDir"
         } else {
-            Write-Log "ADVERTENCIA: No se encontro $file en el repositorio."
+            Write-Log "ADVERTENCIA: No se encontró $file en el repositorio."
         }
     }
 
     if (-not (Test-Path "IIS:\Sites\MiSitio\api")) {
         New-WebApplication -Site "MiSitio" -Name "api" -PhysicalPath $ApiDir -ApplicationPool "DefaultAppPool" | Out-Null
-        Write-Log "Aplicacion /api creada en MiSitio."
+        Write-Log "Aplicación /api creada en MiSitio."
     } else {
-        Write-Log "Aplicacion /api ya existe."
+        Write-Log "Aplicación /api ya existe."
     }
 
     Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/anonymousAuthentication -Name enabled -Value False -Location "MiSitio/api"
     Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/windowsAuthentication -Name enabled -Value True -Location "MiSitio/api"
-    Write-Log "Autenticacion Windows habilitada en /api (Anonymous deshabilitado)."
+    Write-Log "Autenticación Windows habilitada en /api (Anonymous deshabilitado)."
 
     if (-not (Test-Path $LogsDir)) {
         New-Item -Path $LogsDir -ItemType Directory -Force | Out-Null
@@ -460,31 +460,32 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 9. Tarea programada para exportar usuarios cada hora
+# 9. Tarea programada para exportar usuarios (diaria a las 03:00)
 # ------------------------------------------------------------------
-Write-Log "[9/11] Creando tarea programada de exportacion de usuarios..."
+Write-Log "[9/11] Creando tarea programada de exportación de usuarios..."
 $exportAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File `"$exportScript`" -OutputPath `"$adUsersJson`""
-$exportTrigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -At (Get-Date) -Once -Enabled
+$exportTrigger = New-ScheduledTaskTrigger -Daily -At "03:00AM"
 $exportPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $exportSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 try {
     Register-ScheduledTask -TaskName "Exportar-Usuarios-AD" -Action $exportAction -Trigger $exportTrigger -Principal $exportPrincipal -Settings $exportSettings -Force | Out-Null
-    Write-Log "Tarea 'Exportar-Usuarios-AD' registrada (cada hora)."
+    Write-Log "Tarea 'Exportar-Usuarios-AD' registrada (diaria a las 03:00)."
 } catch {
-    Write-Log "ADVERTENCIA: No se pudo crear tarea de exportacion: $($_.Exception.Message)"
+    Write-Log "ADVERTENCIA: No se pudo crear tarea de exportación: $($_.Exception.Message)"
 }
 
 # ------------------------------------------------------------------
 # 10. Eliminar ScheduledTask de bootstrap
 # ------------------------------------------------------------------
-Write-Log "[10/11] Eliminando tarea TFG-Bootstrap..."
+Write-Log "[10/11] Eliminando tareas de bootstrap..."
 Unregister-ScheduledTask -TaskName "TFG-Bootstrap" -Confirm:$false -ErrorAction SilentlyContinue
-Write-Log "Tarea TFG-Bootstrap eliminada."
+Unregister-ScheduledTask -TaskName "TFG-Stage2" -Confirm:$false -ErrorAction SilentlyContinue
+Write-Log "Tareas de bootstrap eliminadas."
 
 # ------------------------------------------------------------------
-# 11. Crear marcador de finalizacion
+# 11. Crear marcador de finalización
 # ------------------------------------------------------------------
-Write-Log "[11/11] Creando marcador de finalizacion..."
+Write-Log "[11/11] Creando marcador de finalización..."
 $bootstrapInfo = @{
     CompletedAt = (Get-Date).ToString("o")
     DomainName = $DomainName

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# iptables-logging.sh - Configura reglas LOG de iptables y rotacion de logs
+# iptables-logging.sh - Configura reglas LOG de iptables y rotación de logs
 #
 
 set -e
@@ -10,7 +10,7 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Anadir reglas LOG para registrar paquetes denegados
+# Añadir reglas LOG para registrar paquetes denegados
 if ! iptables -C INPUT -j LOG --log-prefix "IPTables-Dropped: " --log-level 4 2>/dev/null; then
     iptables -A INPUT -j LOG --log-prefix "IPTables-Dropped: " --log-level 4
 fi
@@ -44,9 +44,9 @@ cat > /etc/logrotate.d/kern-log <<'EOF'
 }
 EOF
 
-# Crear directorio para metricas custom de Node Exporter (textfile collector)
+# Crear directorio para métricas custom de Node Exporter (textfile collector)
 TEXTFILE_DIR="/var/lib/prometheus/node-exporter"
 mkdir -p "$TEXTFILE_DIR"
 chown prometheus:prometheus "$TEXTFILE_DIR" 2>/dev/null || true
 
-echo "Configuracion de logging de iptables completada."
+echo "Configuración de logging de iptables completada."
