@@ -99,16 +99,40 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     $diskReady = $false
     while ($elapsed -lt $maxWait) {
         try {
-            $disk = Get-Disk | Where-Object { $_.PartitionStyle -eq 'RAW' -or $_.NumberOfPartitions -eq 0 }
+            # Buscar discos Offline + Online sin letra de unidad asignada
+            # Esto detecta discos "Not initialized" (Offline) y discos Online sin particiones
+            $disk = Get-Disk | Where-Object { 
+                $_.OperationalStatus -eq 'Offline' -or 
+                $_.OperationalStatus -eq 'Online' 
+            } | Where-Object { 
+                $partitions = Get-Partition -DiskNumber $_.Number -ErrorAction SilentlyContinue
+                -not ($partitions | Where-Object { $_.DriveLetter })
+            } | Select-Object -First 1
+
             if ($disk) {
                 Write-Log "Disco de backup detectado, inicializando..."
-                Initialize-Disk -Number $disk[0].Number -PartitionStyle MBR -PassThru |
-                    New-Partition -UseMaximumSize -DriveLetter E |
-                    Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force | Out-Null
-                $diskReady = $true
-                break
+                try {
+                    # Si el disco está sin inicializar (RAW o Offline), inicializarlo con MBR
+                    if ($disk.PartitionStyle -eq 'RAW') {
+                        Write-Log "Inicializando disco como MBR..."
+                        Initialize-Disk -Number $disk.Number -PartitionStyle MBR -ErrorAction Stop
+                    }
+                    # Crear partición simple con letra E
+                    Write-Log "Creando volumen simple..."
+                    $partition = New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter E -ErrorAction Stop
+                    # Formatear como NTFS con etiqueta Backup
+                    Write-Log "Formateando disco..."
+                    Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force -ErrorAction Stop | Out-Null
+                    $diskReady = $true
+                    Write-Log "Disco de backup configurado correctamente (E:\)"
+                    break
+                } catch {
+                    Write-Log "ERROR al configurar disco: $($_.Exception.Message)"
+                }
             }
-        } catch { }
+        } catch {
+            Write-Log "ADVERTENCIA: Error al procesar disco de backup: $($_.Exception.Message)"
+        }
         Write-Log "Disco no disponible, esperando... ($elapsed/$maxWait s)"
         Start-Sleep -Seconds 10
         $elapsed += 10
