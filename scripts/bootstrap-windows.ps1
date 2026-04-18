@@ -232,7 +232,64 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
 Write-Log "[ESTADO 1] Segundo arranque - configurando AD, IIS, API..."
 
 # ------------------------------------------------------------------
-# 0. Instalar Git y clonar repositorio (si no existen)
+# 0. Detectar e inicializar disco de backup (si existe y no está configurado)
+# ------------------------------------------------------------------
+Write-Log "[0/12] Buscando disco de backup..."
+Write-Log "Enumerando todos los discos del sistema..."
+$allDisks = Get-Disk
+Write-Log "Total de discos detectados: $($allDisks.Count)"
+foreach ($d in $allDisks) {
+    Write-Log "  Disco $($d.Number): Status=$($d.OperationalStatus), PartitionStyle=$($d.PartitionStyle), Size=$([math]::Round($d.Size/1GB, 2))GB"
+}
+
+$diskReady = $false
+$elapsed = 0
+$maxWait = 300
+while ($elapsed -lt $maxWait) {
+    try {
+        Write-Log "Buscando disco sin inicializar o sin letra asignada..."
+        $disk = Get-Disk | Where-Object { 
+            $_.OperationalStatus -eq 'Offline' -or 
+            $_.OperationalStatus -eq 'Online' 
+        } | Where-Object { 
+            $partitions = Get-Partition -DiskNumber $_.Number -ErrorAction SilentlyContinue
+            -not ($partitions | Where-Object { $_.DriveLetter })
+        } | Select-Object -First 1
+
+        if ($disk) {
+            Write-Log ">>> Disco encontrado: Num=$($disk.Number), Status=$($disk.OperationalStatus), PartitionStyle=$($disk.PartitionStyle)"
+            Write-Log "Inicializando disco..."
+            try {
+                if ($disk.PartitionStyle -eq 'RAW') {
+                    Write-Log "Inicializando disco como MBR..."
+                    Initialize-Disk -Number $disk.Number -PartitionStyle MBR -ErrorAction Stop
+                }
+                Write-Log "Creando volumen simple..."
+                $partition = New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter E -ErrorAction Stop
+                Write-Log "Formateando disco como NTFS..."
+                Format-Volume -DriveLetter E -FileSystem NTFS -NewFileSystemLabel "Backup" -Confirm:$false -Force -ErrorAction Stop | Out-Null
+                $diskReady = $true
+                Write-Log ">>>> Disco de backup configurado correctamente (E:\)"
+                break
+            } catch {
+                Write-Log "ERROR al configurar disco: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Log "No se encontró disco sin inicializar en este ciclo"
+        }
+    } catch {
+        Write-Log "ADVERTENCIA: Error al procesar disco de backup: $($_.Exception.Message)"
+    }
+    Write-Log "Esperando... ($elapsed/$maxWait s)"
+    Start-Sleep -Seconds 10
+    $elapsed += 10
+}
+if (-not $diskReady) {
+    Write-Log "ADVERTENCIA: Disco de backup no detectado o no se pudo configurar"
+}
+
+# ------------------------------------------------------------------
+# 0b. Instalar Git y clonar repositorio (si no existen)
 # ------------------------------------------------------------------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     try {
