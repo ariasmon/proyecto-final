@@ -113,8 +113,8 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 
 ### 3.2. Diseño de Seguridad y Accesos
 
-1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
-2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde `172.16.3.0/24`, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
+1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3389/TCP desde Internet (DNAT/RDP al Windows Server), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24` (incluye Grafana 3000/TCP vía VPN). Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde `172.16.3.0/24` y SG-Gateway, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -136,7 +136,7 @@ Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente de
 
 ##### Gateway Ubuntu
 
-El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server se realiza exclusivamente a través de la VPN, sin exposición directa a Internet. Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
+El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server está disponible tanto a través de la VPN como mediante DNAT desde Internet (puerto 3389). Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
 
 **Mitigaciones adoptadas:**
 
@@ -205,6 +205,14 @@ sudo iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATE
 # Persistencia de reglas
 sudo apt update && sudo apt install -y iptables-persistent netfilter-persistent
 sudo netfilter-persistent save
+
+# DNAT: Redirigir RDP desde Internet al Windows Server
+# La IP privada del Gateway se obtiene desde los metadatos de instancia de AWS
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+sudo iptables -t nat -A PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+sudo iptables -t nat -A POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE
+sudo iptables -A FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT
+sudo netfilter-persistent save
 ```
 
 ### 4.3. Configuración del Servidor Interno (Windows Server)
@@ -212,7 +220,7 @@ sudo netfilter-persistent save
 Para garantizar la estabilidad operativa y la conectividad a través del Gateway, se han realizado las siguientes configuraciones críticas:
 
 1. **Optimización de Instancia:** Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM).
-2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `8.8.8.8` y `8.8.4.4` durante el primer arranque. Tras la promoción a Domain Controller, el bootstrap cambia el DNS a `127.0.0.1` (AD DNS local) y `8.8.8.8` como secundario.
+2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `10.0.0.2` (DNS de AWS) y `8.8.8.8` durante el primer arranque. Tras la promoción a Domain Controller, el bootstrap cambia el DNS a `127.0.0.1` (AD DNS local) y `8.8.8.8` como secundario.
 3. **Ruta estática VPN:** Ruta hacia la subred VPN (`172.16.3.0/24`) a través del Gateway (`10.0.2.1`), necesaria para que el Windows Server pueda responder a clientes VPN.
 4. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell:
 
@@ -409,12 +417,16 @@ El Security Group del Gateway define las reglas de acceso perimetral:
 SGGateway:
   Type: AWS::EC2::SecurityGroup
   Properties:
-    GroupDescription: Gateway Ubuntu - SSH, WireGuard, Prometheus y trafico interno
+    GroupDescription: Gateway Ubuntu - SSH, RDP (DNAT), WireGuard, Prometheus y trafico interno
     VpcId: !Ref VPC
     SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
         CidrIp: 0.0.0.0/0
       - IpProtocol: tcp
         FromPort: 9090
@@ -445,6 +457,14 @@ SGInternal:
     SecurityGroupIngress:
       - IpProtocol: -1
         CidrIp: 172.16.3.0/24
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
+        CidrIp: 172.16.3.0/24
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
+        SourceSecurityGroupId: !Ref SGGateway
       - IpProtocol: tcp
         FromPort: 9182
         ToPort: 9182
@@ -505,12 +525,24 @@ UbuntuGateway:
     UserData:
       Fn::Base64: !Sub |
         #!/bin/bash
+        # Habilitar IP Forwarding
         sysctl -w net.ipv4.ip_forward=1
         echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+        # NAT: subred privada → Internet
         iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
+        # NAT: clientes VPN → subred privada
         iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
+        # NAT: clientes VPN → Internet
+        iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
+        # Forwarding VPN ↔ subred privada
         iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
         iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+        # DNAT: RDP desde Internet → Windows Server
+        PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+        iptables -t nat -A PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+        iptables -t nat -A POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE
+        iptables -A FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT
+        # Instalación y bootstrap
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
         apt-get install -y iptables-persistent netfilter-persistent git
@@ -536,20 +568,37 @@ WindowsInternal:
     UserData:
       Fn::Base64: !Sub |
         <powershell>
+        # Stage0: Configuración mínima antes de promoción a DC
         Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
         $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
         $ifIndex = $adapter.ifIndex
         Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
         New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
-        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
+        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("10.0.0.2","8.8.8.8")
         route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
+        # Instalar roles y habilitar RDP
+        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
+        Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
+        Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        Start-Service TermService -ErrorAction SilentlyContinue
+        Set-Service -Name TermService -StartupType Automatic
+        New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+        # Crear ScheduledTask TFG-Stage2 para continuar tras reinicio
+        # (espera DNS, descarga y ejecuta bootstrap-windows.ps1)
+        # ... (véase despliegue-tfg.yml para el código completo)
         $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
-        powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
+        Import-Module ADDSDeployment
+        Install-ADDSForest -DomainName "tfg.vp" -DomainNetBIOSName "TFG" -SafeModeAdministratorPassword $pwd -Force
         </powershell>
 ```
 
-El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, RDP, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.20). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
+El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, RDP, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.19). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
+
+> **Nota sobre la estrategia Stage0/Stage2 en Windows:** CloudFormation crea las instancias en paralelo, por lo que el Windows Server puede arrancar antes de que el Gateway Ubuntu esté listo para proporcionar NAT y DNS. Para resolver esto, el UserData del Windows (Stage0) configura la red con DNS `10.0.0.2` (DNS de AWS, disponible sin Gateway), instala roles localmente y crea una tarea programada `TFG-Stage2`. Tras la promoción a DC y el reinicio automático, la tarea `TFG-Stage2` espera a que DNS esté disponible, descarga `bootstrap-windows.ps1` desde GitHub y lo ejecuta. El código completo de la ScheduledTask se encuentra en `despliegue-tfg.yml`.
+
+> **Nota sobre DNAT y dirección IP:** Las reglas DNAT para RDP en el UserData de Ubuntu obtienen la IP privada del Gateway dinámicamente desde los metadatos de instancia de AWS (`169.254.169.254`). Esto es necesario porque las reglas DNAT con la IP elástica no funcionan en AWS, ya que el Internet Gateway realiza NAT antes de que el tráfico llegue a iptables.
 
 ### 4.7. Implementación de VPN con WireGuard
 
@@ -609,6 +658,9 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
 # Forwarding entre VPN y subred privada
 sudo iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
 sudo iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+# NAT para que clientes VPN accedan a Internet
+sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
 
 # Persistir reglas
 sudo netfilter-persistent save
@@ -804,7 +856,7 @@ scrape_configs:
 | `node` | Métricas de Ubuntu Gateway | 9100 |
 | `windows-server` | Métricas de Windows Server | 9182 |
 
-> **Nota sobre intervalos de recolección:** El job `prometheus` tiene configurado un `scrape_interval` de 5s para la automonitorización del propio servidor. Los jobs `node` y `windows-server` utilizan el intervalo por defecto de 1 minuto. Este diseño es deliberado: dadas las limitaciones de recursos de las instancias (t3.micro para el Gateway y t3.small para Windows Server), un intervalo de 1 minuto proporciona suficiente granularidad para las consultas `rate(...[5m])` del dashboard y las reglas de alerta, sin comprometer la estabilidad del sistema.
+> **Nota sobre intervalos de recolección:** El job `prometheus` tiene configurado un `scrape_interval` de 5s para la automonitorización del propio servidor. Los jobs `node` y `windows-server` utilizan el intervalo global definido de 15 segundos. Este diseño es deliberado: dadas las limitaciones de recursos de las instancias (t3.micro para el Gateway y t3.small para Windows Server), un intervalo de 15 segundos proporciona suficiente granularidad para las consultas `rate(...[5m])` del dashboard y las reglas de alerta, sin comprometer la estabilidad del sistema.
 
 #### Reglas de Alerta
 
@@ -1665,7 +1717,7 @@ El script realiza las siguientes acciones:
 
 Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
 
-> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup"), la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.20). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
+> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup"), la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.19). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
 
 #### Prerrequisito: volumen de backup
 
@@ -1806,7 +1858,7 @@ wbadmin start systemstaterecovery -version:<VERSION_ID>
 
 Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (formato `mm/dd/yyyy-hh:mm`).
 
-### 4.20. Automatización completa del despliegue
+### 4.19. Automatización completa del despliegue
 
 El despliegue de ambos servidores (Gateway Ubuntu y Windows Server) se realiza de forma automática mediante scripts idempotentes ejecutados desde el UserData de CloudFormation, sin intervención manual. Esto cumple con el requisito RF-02 (Despliegue Automatizado) y el principio GitOps (RNF-02) definidos en la sección 2.
 
@@ -1980,7 +2032,7 @@ Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Stage2`
 | 6 | IIS: sitio MiSitio | Crear sitio, copiar `Pagina IIS/*` a `C:\inetpub\wwwroot\misitio\`, eliminar Default Web Site |
 | 7 | API `/api` | Directorio `api\` con `ad-user-service.ps1`, `create-user.ps1` y `web.config`; webapp en IIS; Win Auth habilitada, Anonymous deshabilitada; permisos `IIS_IUSRS`/`IUSR` en directorio de logs |
 | 8 | `ad-users.json` | Primera exportación de usuarios AD al directorio web |
-| 9 | Tarea exportación usuarios | Cada hora, ejecuta `exportar-usuarios-ad.ps1` para mantener `ad-users.json` actualizado |
+| 9 | Tarea exportación usuarios | Diariamente a las 03:00, ejecuta `exportar-usuarios-ad.ps1` para mantener `ad-users.json` actualizado |
 | 10 | Eliminar ScheduledTask | `TFG-Bootstrap` ya no necesaria |
 | 11 | Marcador de finalización | `C:\tfg-bootstrap-done` → el script no hace nada si se ejecuta de nuevo |
 
@@ -2034,7 +2086,7 @@ El script es seguro ejecutarlo múltiples veces:
 | GPOs (contraseñas, firewall equipos) | | ✅ |
 | Políticas de auditoría avanzada | | ✅ |
 
-### 4.19. Verificación y pruebas de conectividad
+### 4.20. Verificación y pruebas de conectividad
 
 Esta sección documenta la validación final de la infraestructura desplegada, verificando la conectividad de red desde el Windows Server hacia Internet, el Gateway y los servicios internos. Las pruebas acreditan el correcto funcionamiento del NAT, el routing, la resolución DNS y la conectividad VPN.
 
