@@ -1,0 +1,33 @@
+{
+  "DestinationRoot": "E:\\Backups",
+  "CreateTimestampFolder": true,
+  "CompressArchive": false,
+  "RetentionDays": 30,
+  "MaxBackupSets": 12,
+  "LogDirectory": "C:\\Logs\\Backups",
+  "EnableSystemStateBackup": false,
+  "SystemStateTarget": "E:",
+  "FullDiskBackup": {
+    "Enabled": false,
+    "BackupTarget": "E:",
+    "UseAllCritical": true,
+    "IncludeVolumes": []
+  },
+  "RobocopyThreads": 8,
+  "RobocopyRetryCount": 2,
+  "RobocopyWaitSeconds": 5,
+  "Sources": [
+    {
+      "Name": "IIS",
+      "Path": "C:\\inetpub\\wwwroot",
+      "Mirror": false,
+      "ExcludeFiles": [
+        "*.log",
+        "*.tmp"
+      ],
+      "ExcludeDirs": [
+        "Temp"
+      ]
+    }
+  ]
+}
