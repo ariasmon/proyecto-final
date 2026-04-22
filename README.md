@@ -1,160 +1,146 @@
-# Copia de seguridad de Active Directory
+# Documentacion del Script de Backup para Windows Server 2016
 
 ## 1. Objetivo
+Se ha creado un sistema de backup personalizable para Windows Server 2016 con dos modos principales:
 
-Configurar una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, utilizando Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
+- Backup de carpetas (con Robocopy)
+- Backup completo de disco (con wbadmin)
 
-## 2. Prerrequisito: volumen de backup
+Ademas, se incluyo un asistente interactivo para elegir opciones en tiempo de ejecucion, y la posibilidad de crear tareas programadas (diaria, semanal o mensual).
 
-El servidor Windows no dispone de un segundo volumen dedicado para copias de seguridad, por lo que primero hay que añadir un disco adicional en AWS.
+## 2. Archivos creados y actualizados
 
-### 2.1. Creación del volumen en AWS
+- scripts/backup-windows-server.ps1
+  Script principal con toda la logica de backup.
 
-1. Abrir la consola de AWS.
-2. Ir a **EC2 > Volumes**.
-3. Seleccionar **Create volume**.
-4. Configurar:
-   - Tipo: `gp3`
-   - Tamaño: `10 GiB`
-   - Availability Zone: la misma que la instancia `Windows-AD-TFG`
-5. Crear el volumen.
-6. Seleccionarlo y pulsar **Attach volume**.
-7. Asociarlo a la instancia `Windows-AD-TFG`.
+- scripts/backup-config.json
+  Configuracion activa por defecto para ejecucion no interactiva.
 
-### 2.2. Inicialización en Windows Server
+## 3. Funcionalidades implementadas
 
-Una vez adjuntado el disco:
+### 3.1 Modos de ejecucion
 
-1. Abrir **Disk Management**.
-2. Inicializar el nuevo disco si aparece sin inicializar.
-3. Crear un volumen simple.
-4. Formatearlo en **NTFS**.
-5. Asignar la letra **E:**.
-6. Poner la etiqueta **Backup**.
+- Modo interactivo
+  Permite configurar todo mediante preguntas en consola.
 
-<img width="941" height="91" alt="Creaccion disco duro " src="https://github.com/user-attachments/assets/1281f5dc-721a-4892-87e6-e4b172a3b8fe" />
+- Modo por configuracion JSON
+  Lee valores desde backup-config.json o desde la ruta indicada con el parametro ConfigPath.
 
+- Modo simulacion (DryRun)
+  Muestra que se haria sin ejecutar cambios reales.
 
-## 3. Instalación de Windows Server Backup
+### 3.2 Backup de carpetas con Robocopy
 
-Para usar la consola de copias de seguridad y `wbadmin`, hay que instalar la característica **Windows Server Backup**.
+- Copia por origen definido en Sources.
+- Modo espejo opcional por origen (Mirror).
+- Soporte de exclusion de archivos y carpetas (cuando vengan en JSON).
+- Manejo de codigos de salida de Robocopy:
+  - 0 a 7: exito total o parcial
+  - mayor a 7: error
 
-### 3.1. Desde Server Manager
+### 3.3 Backup de estado del sistema
 
-1. Abrir **Server Manager**.
-2. Ir a **Add roles and features**.
-3. Avanzar hasta **Features**.
-4. Marcar **Windows Server Backup**.
-5. Completar la instalación.
+- Opcion EnableSystemStateBackup.
+- Ejecuta wbadmin start systemstatebackup con destino configurable.
 
-### 3.2. Desde PowerShell
+### 3.4 Backup completo de disco
 
-```powershell
-Install-WindowsFeature Windows-Server-Backup -IncludeManagementTools
-```
+- Nueva seccion FullDiskBackup en configuracion.
+- Permite dos enfoques:
+  - allCritical para volumenes criticos del sistema
+  - include para volumenes especificos (por ejemplo C:, D:)
+- Valida que exista destino y que haya criterio valido de seleccion de volumenes.
 
-## 4. Backup manual del estado del sistema
+### 3.5 Seleccion automatica de volumenes
 
-El backup manual del estado del sistema guarda los componentes esenciales de Active Directory y del sistema operativo necesarios para restaurar el controlador de dominio.
+En modo interactivo, cuando se elige copia completa por volumenes especificos:
 
-### 4.1. Ejecutar la copia
+- Se detectan volumenes locales automaticamente.
+- Se muestran numerados.
+- Se puede seleccionar por indices (ejemplo: 1,2), todos con A o entrada manual.
 
-Abrir una consola como administrador y ejecutar:
+### 3.6 Tareas programadas
 
-```cmd
-wbadmin start systemstatebackup -backuptarget:E: -quiet
-```
+Se puede crear o actualizar una tarea programada desde el asistente:
 
-<img width="702" height="301" alt="Creacciondelbackup" src="https://github.com/user-attachments/assets/0f7d7f18-b4bb-419f-8efb-cfb9f113f751" />
+- Frecuencia diaria, semanal o mensual
+- Hora de ejecucion
+- Dia de semana (si semanal)
+- Dia del mes (si mensual)
+- Ejecuta como SYSTEM con privilegios altos
 
+### 3.7 Retencion y limpieza
 
-### 4.2. Qué incluye
+- Eliminacion por antiguedad (RetentionDays)
+- Eliminacion por limite de copias (MaxBackupSets)
 
-Este backup protege, entre otros elementos:
+## 4. Mejoras de robustez aplicadas
 
-- Base de datos de Active Directory (`ntds.dit`)
-- SYSVOL, donde residen GPOs y scripts
-- Registro del sistema
-- DNS integrado en AD
-- COM+
-- Certificados del sistema
+Se corrigieron incidencias detectadas durante pruebas:
 
-## 5. Verificación de backups existentes
+- Error con ConfigPath cuando PSScriptRoot estaba vacio
+  Se agregaron rutas de fallback para construir la ruta de configuracion.
 
-Para comprobar que las copias se están generando correctamente:
+- Error por variable LogFile no inicializada bajo StrictMode
+  Se inicializo script:LogFile y se controlo escritura condicional.
 
-```cmd
-wbadmin get versions -backuptarget:E:
-```
+- Error al registrar lineas vacias de salida externa
+  Se ignoran lineas vacias de Robocopy, wbadmin y schtasks antes de loguear.
 
-<img width="437" height="116" alt="CopiasDisponiblesbackup" src="https://github.com/user-attachments/assets/3c845115-3ec1-42e5-abca-f38e998623d5" />
+## 5. Estructura de configuracion JSON
 
+Campos principales disponibles:
 
-Este comando muestra las versiones disponibles almacenadas en el volumen de backup.
+- DestinationRoot
+- CreateTimestampFolder
+- CompressArchive
+- RetentionDays
+- MaxBackupSets
+- LogDirectory
+- EnableSystemStateBackup
+- SystemStateTarget
+- FullDiskBackup:
+  - Enabled
+  - BackupTarget
+  - UseAllCritical
+  - IncludeVolumes
+- RobocopyThreads
+- RobocopyRetryCount
+- RobocopyWaitSeconds
+- ScheduledTask:
+  - Enabled
+  - Frequency
+  - Time
+  - DayOfWeek
+  - DayOfMonth
+  - TaskName
+- Sources (lista de origenes)
 
-## 6. Backup completo del servidor
+## 6. Formas de uso
 
-Si se quiere preparar una recuperación completa del equipo, incluyendo los volúmenes críticos necesarios para arrancar el sistema desde cero, se puede ejecutar:
+### 6.1 Interactivo
 
-```cmd
-wbadmin start backup -allcritical -backuptarget:E: -quiet
-```
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -Interactive
 
-Este tipo de copia es más amplia que el estado del sistema, porque incluye los volúmenes críticos del servidor.
+### 6.2 Interactivo en simulacion
 
-## 7. Automatización con Task Scheduler
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -Interactive -DryRun
 
-Para programar la copia de forma semanal, se puede usar Task Scheduler o crear la tarea por línea de comandos.
+### 6.3 Configuracion JSON
 
-### 7.1. Crear tarea con `schtasks`
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1
 
-```cmd
-schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM
-```
+### 6.4 Configuracion JSON personalizada
 
-### 7.2. Parámetros de la tarea
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -ConfigPath C:\ruta\mi-config.json
 
-- Nombre: `Backup-AD-Semanal`
-- Frecuencia: semanal
-- Día: domingo
-- Hora: 03:00
-- Usuario: `SYSTEM`
-- Acción: ejecutar `wbadmin start systemstatebackup -backuptarget:E: -quiet`
+## 7. Recomendaciones operativas
 
-<img width="469" height="367" alt="CreaccionSemanalbackup" src="https://github.com/user-attachments/assets/4837afb5-600f-4f0f-8f6d-9629d6547c71" />
+- Probar siempre primero con DryRun.
+- Evitar usar el mismo volumen como origen y destino de backup completo.
+- Si se usa copia completa, preferir allCritical cuando el objetivo sea recuperacion del sistema.
+- Verificar periodicamente logs y espacio libre del destino.
 
+## 8. Resultado final
 
-### 7.3. Configuración desde la interfaz gráfica
-
-Si se prefieren capturas más visuales, se puede crear la tarea manualmente desde **Task Scheduler**:
-
-1. Abrir **Task Scheduler**.
-2. Crear una tarea nueva.
-3. Definir un desencadenador semanal, domingo a las 03:00.
-4. Configurar la acción para ejecutar `wbadmin`.
-5. Indicar que la tarea se ejecute como `SYSTEM`.
-
-## 8. Restauración
-
-En caso de fallo, la restauración debe hacerse desde **Directory Services Restore Mode (DSRM)**.
-
-### 8.1. Arranque en DSRM
-
-1. Reiniciar el servidor en modo DSRM.
-2. Iniciar sesión con la contraseña configurada al promover el controlador de dominio.
-
-### 8.2. Recuperación del estado del sistema
-
-Consultar primero las versiones disponibles:
-
-```cmd
-wbadmin get versions -backuptarget:E:
-```
-
-Después, restaurar la versión elegida:
-
-```cmd
-wbadmin start systemstaterecovery -version:<VERSION_ID>
-```
-
-Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior.
+Se ha construido una solucion de backup flexible y guiada, pensada para administracion real de Windows Server 2016, con automatizacion por tarea programada y soporte para backup de archivos y backup completo del sistema/disco.
