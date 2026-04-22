@@ -2280,7 +2280,7 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 
 | Prueba | Descripción | Resultado esperado | Estado |
 |--------|-------------|--------------------|--------|
-| Reinicio de servicios críticos (Ubuntu) | `systemctl restart prometheus grafana-server prometheus-alertmanager wg-quick@wg0` | Servicios activos en < 10 s, métricas sin pérdida de datos históricos | ⏳ Pendiente de imagen |
+| Reinicio de servicios críticos (Ubuntu) | `systemctl restart prometheus grafana-server wg-quick@wg0` | Servicios activos en < 10 s, métricas sin pérdida de datos históricos | ✅ Validado |
 | Reinicio de servicios críticos (Windows) | `Restart-Service TermService`, reciclaje de IIS | RDP y portal web operativos tras reinicio | ⏳ Pendiente de imagen |
 | Simulación de caída de instancia Windows | Parada controlada del Windows Server, observación de alertas y recuperación | Alerta `InstanceDown` en Telegram en < 1 min; Prometheus marca target como `down` | ✅ Validado (sección 4.20) |
 | Validación de backup | Ejecución de `wbadmin get versions -backuptarget:E:` | Al menos una versión de System State disponible | ⏳ Pendiente de imagen |
@@ -2321,13 +2321,18 @@ Entre las correcciones más relevantes destacan:
 - Corrección de reglas DNAT para usar la IP privada del Gateway obtenida dinámicamente desde los metadatos de AWS.
 - Implementación de la estrategia Stage0/Stage2 en Windows Server para resolver dependencias de arranque en paralelo de CloudFormation.
 
----
+#### Verificación de servicios tras reinicio
 
-### 5.7. Documentos generados
+Tras ejecutar el reinicio manual de los servicios críticos en el Gateway Ubuntu, se verificó su estado mediante `systemctl status`:
 
-| Documento | Ubicación | Descripción |
-|-----------|-----------|-------------|
-| **Plan de pruebas** | Sección 5.1 del README.md | Alcance, tipos de pruebas, herramientas y criterios de aceptación. |
-| **Informe de validación** | Secciones 5.2–5.6 del README.md | Resultados de pruebas funcionales, rendimiento, seguridad, disponibilidad y resumen de correcciones. |
+![Prometheus activo](imagenes/prometheus-active.png)
 
-> **Nota:** Las pruebas de conectividad detalladas (tracert, ping, nslookup, dashboards y alertas) se mantienen en la sección **4.20** como parte del manual de implantación, dado que constituyen la verificación inmediata del despliegue. El presente punto 5 consolida y amplía dichas pruebas desde la perspectiva de la validación formal del sistema.
+*Figura: Estado del servicio Prometheus tras reinicio manual, mostrando `active (running)`.*
+
+![WireGuard activo](imagenes/wireguard-active.png)
+
+*Figura: Estado del servicio WireGuard (`wg-quick@wg0`) tras reinicio manual, mostrando `active (running)`.*
+
+![Grafana activo](imagenes/grafana-active.png)
+
+*Figura: Estado del servicio Grafana Server tras reinicio manual, mostrando `active (running)`.*
