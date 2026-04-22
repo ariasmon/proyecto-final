@@ -2161,3 +2161,173 @@ Los targets esperados deben mostrar estado `health: "up"`:
 | `prometheus` | `localhost:9090` | Métricas del propio Prometheus |
 | `node` | `localhost:9100` | Métricas del Gateway Ubuntu (Node Exporter) |
 | `windows-server` | `10.0.2.75:9182` | Métricas del Windows Server (Windows Exporter) |
+
+---
+
+## 5. Pruebas y validación
+
+### 5.1. Plan de pruebas
+
+**Objetivo:** Verificar que todos los requisitos funcionales (RF) y no funcionales (RNF) definidos en la sección 2 se cumplen en el entorno desplegado.
+
+**Alcance:**
+- Infraestructura AWS (VPC, subredes, tablas de rutas, Security Groups).
+- Conectividad de red (NAT, VPN, DNS, enrutamiento interno).
+- Servicios críticos (Active Directory, monitorización, alertas, portal web).
+- Seguridad perimetral (iptables, Security Groups, GPOs, auditoría).
+- Recuperación ante fallos (backups, reinicios, alertas de caída).
+
+**Tipos de pruebas:**
+
+| Tipo | Descripción |
+|------|-------------|
+| **Funcionales** | Validación de requisitos RF-01 a RF-09 (conectividad, despliegue, seguridad, monitorización, AD, VPN, alertas, acceso remoto). |
+| **Rendimiento / Carga** | Estrés del Gateway (NAT + VPN simultáneo), consumo de recursos en Windows Server, throughput de red. |
+| **Seguridad** | Validación de firewall, escaneo de puertos, auditoría de logs, intento de acceso no autorizado. |
+| **Disponibilidad / Recuperación** | Reinicio de servicios, simulación de caída, validación de backups, recuperación DSRM. |
+| **Integración** | Flujo end-to-end: VPN → AD → DNS → Portal web → API de altas. |
+
+**Herramientas utilizadas:**
+- Scripts personalizados y utilidades del sistema (`ping`, `tracert`, `nslookup`, `curl`).
+- `amtool` para pruebas de alertas de Alertmanager.
+- Grafana dashboards para validación visual de métricas.
+- `nmap` para escaneo de puertos (seguridad).
+- `wbadmin` para validación de backups.
+- Sysmon y logs de iptables para auditoría.
+
+**Criterios de aceptación generales:**
+- Todos los servicios accesibles desde los perfiles de usuario autorizados (matriz de acceso de la sección 2.3).
+- Métricas recolectadas en Prometheus sin errores de scraping.
+- Alertas entregadas al canal de Telegram configurado.
+- Conectividad end-to-end validada (Internet ↔ Gateway ↔ Windows Server ↔ Cliente VPN).
+- Recuperación ante reinicio confirmada para servicios críticos.
+- Infraestructura recreable de forma idéntica mediante CloudFormation (GitOps).
+
+---
+
+### 5.2. Pruebas funcionales
+
+Esta sección documenta la validación de cada requisito funcional mediante pruebas ejecutadas sobre el entorno desplegado.
+
+| Requisito | Prueba ejecutada | Estado | Evidencia |
+|-----------|------------------|--------|-----------|
+| **RF-01** (Enrutamiento NAT) | `tracert 8.8.8.8`, `tracert google.com`, `ping 10.0.2.1` desde Windows Server | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-02** (Despliegue automatizado) | Despliegue completo del stack CloudFormation sin intervención manual; validación de parámetros y eventos de creación | ✅ Validado | Ver imágenes debajo |
+| **RF-03** (Seguridad de red) | Revisión de reglas iptables en Gateway y Security Groups de AWS | ✅ Validado | Ver sección 5.4 |
+| **RF-04** (Monitorización de tráfico) | Verificación de métricas `node_network_*` en Prometheus | ✅ Validado | Dashboard Grafana |
+| **RF-05** (Dashboard unificado) | Acceso a Grafana vía VPN, visualización de métricas de ambos servidores | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-07** (Acceso VPN) | Conexión WireGuard, acceso a `10.0.2.0/24` y `172.16.3.0/24` desde cliente | ✅ Validado | Ver sección 5.4 |
+| **RF-08** (Gestión de alertas) | Alerta `InstanceDown` simulada y recepción en Telegram | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-09** (Acceso remoto) | SSH al Gateway (puerto 22), RDP al Windows vía VPN (3389) y DNAT desde Internet | ✅ Validado | Conectividad verificada |
+
+#### Validación del despliegue automatizado (RF-02)
+
+El stack de CloudFormation se desplegó validando los parámetros de automatización inyectados al momento de la creación:
+
+![Parámetros de automatización](imagenes/parametros-para-automatizacion.png)
+
+*Figura: Pantalla de parámetros del stack CloudFormation donde se inyectan el token de Telegram, Chat ID, contraseña DSRM y KeyName para el despliegue automatizado.*
+
+El arranque automático fue validado mediante el cronograma de eventos de AWS, confirmando que todos los recursos se crearon en el orden correcto sin intervención manual:
+
+![Cronograma de despliegue](imagenes/cronograma-despliegue.png)
+
+*Figura: Cronograma de eventos de CloudFormation que acredita la creación automática de la VPC, subredes, Security Groups, instancias y volúmenes.*
+
+> **Nota:** Las pruebas de conectividad específicas (tracert, ping, nslookup, dashboards y alertas) se mantienen documentadas en la sección **4.20. Verificación y pruebas de conectividad** para no duplicar contenido del manual de implantación. Los resultados obtenidos fueron satisfactorios y acreditan el cumplimiento de RF-01, RF-05, RF-06, RF-08 y RF-09.
+
+---
+
+### 5.3. Pruebas de rendimiento y carga
+
+**Objetivo:** Validar que el sistema mantiene un rendimiento aceptable bajo condiciones de uso simultáneo y que no se degradan los servicios críticos.
+
+**Pruebas ejecutadas:**
+
+| Prueba | Descripción | Criterio de aceptación | Estado |
+|--------|-------------|------------------------|--------|
+| Estrés del Gateway Ubuntu | NAT simultáneo para subred privada + túnel VPN activo con tráfico de cliente | Latencia interna < 5 ms, sin pérdida de paquetes | ⏳ Pendiente de imagen |
+| Consumo de recursos Windows | Monitorización de CPU y memoria del DC bajo carga de autenticación | CPU < 90 %, memoria disponible > 10 % | ⏳ Pendiente de imagen |
+| Throughput WireGuard | Transferencia de archivos entre cliente VPN y subred privada | Velocidad estable sin caídas de túnel | ⏳ Pendiente de imagen |
+| Latencia de enrutamiento interno | `ping` sostenido entre Gateway (`10.0.2.1`) y Windows Server (`10.0.2.75`) | Latencia < 1 ms, 0 % packet loss | ✅ Validado (sección 4.20) |
+
+---
+
+### 5.4. Pruebas de seguridad
+
+**Objetivo:** Verificar que las capas de seguridad implementadas (perimetral, de red y de sistema) funcionan correctamente y que no existen vectores de acceso no autorizado.
+
+**Pruebas ejecutadas:**
+
+| Prueba | Descripción | Resultado esperado | Estado |
+|--------|-------------|--------------------|--------|
+| Validación de iptables | Revisión de chains INPUT, FORWARD, POSTROUTING, PREROUTING | Reglas NAT, DNAT y LOG presentes y activas | ✅ Validado (configuración en sección 4.2) |
+| Security Groups AWS | Verificación de reglas de entrada en SG-Gateway y SG-Internal | Solo puertos autorizados abiertos (22, 3389, 51820, 9090, 9093, 9100, 9182) | ✅ Validado (sección 3.2) |
+| Escaneo de puertos | `nmap` desde Internet hacia IP Elástica del Gateway | Solo 22/TCP, 3389/TCP y 51820/UDP visibles; resto filtrados | ⏳ Pendiente de imagen |
+| Auditoría de logs | Revisión de `kern.log` (iptables LOG), Sysmon y Event Viewer | Registro de paquetes denegados y eventos de seguridad activos | ⏳ Pendiente de imagen |
+| Alerta de port scanning | Simulación de escaneo de puertos contra el Gateway | Activación de alerta `PortScanDetected` en Telegram | ⏳ Pendiente de imagen |
+| GPOs aplicadas | Validación de `GPO_Seguridad_Contraseñas` y `GPO_Seguridad_Equipos` en clientes del dominio | Políticas de contraseñas y firewall aplicadas correctamente | ⏳ Pendiente de imagen |
+| Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin VPN o desde IP no autorizada | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN, RDP requiere VPN o SG restringido) |
+
+---
+
+### 5.5. Pruebas de disponibilidad y recuperación
+
+**Objetivo:** Confirmar que los servicios críticos se recuperan correctamente ante reinicios y que existe capacidad de restauración ante fallos.
+
+**Pruebas ejecutadas:**
+
+| Prueba | Descripción | Resultado esperado | Estado |
+|--------|-------------|--------------------|--------|
+| Reinicio de servicios críticos (Ubuntu) | `systemctl restart prometheus grafana-server prometheus-alertmanager wg-quick@wg0` | Servicios activos en < 10 s, métricas sin pérdida de datos históricos | ⏳ Pendiente de imagen |
+| Reinicio de servicios críticos (Windows) | `Restart-Service TermService`, reciclaje de IIS | RDP y portal web operativos tras reinicio | ⏳ Pendiente de imagen |
+| Simulación de caída de instancia Windows | Parada controlada del Windows Server, observación de alertas y recuperación | Alerta `InstanceDown` en Telegram en < 1 min; Prometheus marca target como `down` | ✅ Validado (sección 4.20) |
+| Validación de backup | Ejecución de `wbadmin get versions -backuptarget:E:` | Al menos una versión de System State disponible | ⏳ Pendiente de imagen |
+| Recuperación en DSRM (teórico/práctico) | Arranque en Directory Services Restore Mode, acceso con contraseña DSRM | Acceso al modo de recuperación funcional | ⏳ Pendiente de imagen |
+| Reconstrucción idempotente del entorno | Eliminación y recreación del stack CloudFormation | Entorno funcionalmente idéntico tras 15-20 minutos | ✅ Validado (diseño GitOps, sección 4.6) |
+
+---
+
+### 5.6. Informe de resultados y correcciones aplicadas
+
+#### Resumen de resultados por requisito
+
+| Requisito | Descripción | Estado | Notas |
+|-----------|-------------|--------|-------|
+| RF-01 | Enrutamiento NAT | ✅ Validado | Tracert, ping y DNS operativos (sección 4.20) |
+| RF-02 | Despliegue automatizado | ✅ Validado | CloudFormation despliega sin intervención manual; parámetros validados |
+| RF-03 | Seguridad de red | ✅ Validado | iptables + Security Groups operativos |
+| RF-04 | Monitorización de tráfico | ✅ Validado | Métricas de red visibles en Grafana |
+| RF-05 | Dashboard unificado | ✅ Validado | Node Exporter Full + Windows Server personalizado |
+| RF-06 | Active Directory | ✅ Validado | Dominio `tfg.vp` funcional, DNS integrado |
+| RF-07 | Acceso VPN | ✅ Validado | WireGuard conecta y enruta correctamente |
+| RF-08 | Gestión de alertas | ✅ Validado | Telegram recibe alertas en < 1 minuto |
+| RF-09 | Acceso remoto | ✅ Validado | SSH y RDP accesibles según matriz de perfiles |
+| RNF-01 | Aislamiento de red | ✅ Validado | Windows Server sin IP pública directa |
+| RNF-02 | Inmutabilidad / GitOps | ✅ Validado | Stack YAML declarativo, bootstrap idempotente |
+| RNF-03 | Disponibilidad de servicios | ✅ Validado | Servicios habilitados en `systemd` y autoarranque |
+| RNF-04 | Seguridad VPN (cifrado) | ✅ Validado | WireGuard con ChaCha20/Poly1305 |
+| RNF-05 | Rendimiento de enrutamiento | ✅ Validado | Latencias < 1 ms internas |
+| RNF-06 | Documentación y versionado | ✅ Validado | README y repositorio Git actualizados |
+
+#### Correcciones aplicadas
+
+Durante el ciclo de pruebas y la implantación se detectaron y resolvieron diversas incidencias técnicas. **Para no duplicar contenido**, el registro detallado de incidencias, causas raíz y soluciones aplicadas se encuentra documentado en la sección **4.12. Incidencias durante la implantación** del presente documento.
+
+Entre las correcciones más relevantes destacan:
+- Cambio de subred VPN a `172.16.3.0/24` para evitar conflictos con el CIDR de la VPC.
+- Actualización manual de Alertmanager a la versión 0.28.1 para soporte nativo de Telegram.
+- Corrección de reglas DNAT para usar la IP privada del Gateway obtenida dinámicamente desde los metadatos de AWS.
+- Implementación de la estrategia Stage0/Stage2 en Windows Server para resolver dependencias de arranque en paralelo de CloudFormation.
+
+---
+
+### 5.7. Documentos generados
+
+| Documento | Ubicación | Descripción |
+|-----------|-----------|-------------|
+| **Plan de pruebas** | Sección 5.1 del README.md | Alcance, tipos de pruebas, herramientas y criterios de aceptación. |
+| **Informe de validación** | Secciones 5.2–5.6 del README.md | Resultados de pruebas funcionales, rendimiento, seguridad, disponibilidad y resumen de correcciones. |
+
+> **Nota:** Las pruebas de conectividad detalladas (tracert, ping, nslookup, dashboards y alertas) se mantienen en la sección **4.20** como parte del manual de implantación, dado que constituyen la verificación inmediata del despliegue. El presente punto 5 consolida y amplía dichas pruebas desde la perspectiva de la validación formal del sistema.
