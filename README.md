@@ -157,7 +157,7 @@ El Windows Server opera como controlador de dominio único para `tfg.vp`, incluy
 - **Windows Exporter:** Expone métricas de salud del sistema (CPU, memoria, disco, servicios) que permiten anticipar degradaciones.
 - **Contraseña DSRM:** Configurada durante la promoción del DC (sección 4.4), permite acceder en modo de restauración de Directory Services para tareas de recuperación.
 
-**En un entorno productivo:** Se desplegaría un segundo controlador de dominio para proporcionar redundancia de autenticación y DNS, y se automatizarían copias de seguridad del System State mediante `wbadmin` (véase la sección de Backup AD).
+**En un entorno productivo:** Se desplegaría un segundo controlador de dominio para proporcionar redundancia de autenticación y DNS, y se automatizarían copias de seguridad del System State mediante `wbadmin` (véase la sección 4.18).
 
 ##### Stack de monitorización
 
@@ -1713,7 +1713,11 @@ El script realiza las siguientes acciones:
 ![Portal web IIS](imagenes/Imagen-PaginaWebIIS.png)
 *Figura 4: Portal web interno desplegado en IIS sobre el Windows Server.*
 
-### 4.18. Copia de seguridad de Active Directory
+### 4.18. Estrategias de copia de seguridad
+
+Se han configurado dos estrategias de copia de seguridad para el controlador de dominio Windows Server: un backup automatizado del estado del sistema mediante `wbadmin` (gestionado por `bootstrap-windows.ps1`) y un script avanzado de backup (`backup-windows-server.ps1`) con soporte para modos interactivo, JSON y DryRun.
+
+#### 4.18.1 Backup de estado del sistema con wbadmin
 
 Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
 
@@ -1857,6 +1861,126 @@ wbadmin start systemstaterecovery -version:<VERSION_ID>
 ```
 
 Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (formato `mm/dd/yyyy-hh:mm`).
+
+#### 4.18.2 Script de backup avanzado (backup-windows-server.ps1)
+
+Además del backup automatizado del estado del sistema, se ha desarrollado un script de backup flexible e interactivo para Windows Server. Este script permite realizar copias de carpetas (mediante Robocopy), backups del estado del sistema (con `wbadmin`) y backups completos de disco, con soporte para ejecución interactiva, configuración por JSON y modo simulación (DryRun).
+
+##### Archivos
+
+| Archivo | Descripción |
+|---------|-------------|
+| `scripts/backup-windows-server.ps1` | Script principal con la lógica de backup |
+| `scripts/backup-config.json` | Configuración por defecto para ejecución no interactiva |
+
+##### Modos de ejecución
+
+- **Modo interactivo:** Permite configurar todo mediante preguntas en consola.
+- **Modo por configuración JSON:** Lee valores desde `backup-config.json` o desde la ruta indicada con el parámetro `-ConfigPath`.
+- **Modo simulación (DryRun):** Muestra qué se haría sin ejecutar cambios reales.
+
+##### Funcionalidades implementadas
+
+**Backup de carpetas con Robocopy:**
+- Copia por origen definido en `Sources`.
+- Modo espejo opcional por origen (`Mirror`).
+- Soporte de exclusión de archivos y carpetas.
+- Manejo de códigos de salida de Robocopy (0–7: éxito; >7: error).
+
+**Backup de estado del sistema:**
+- Opción `EnableSystemStateBackup`.
+- Ejecuta `wbadmin start systemstatebackup` con destino configurable.
+
+**Backup completo de disco:**
+- Nueva sección `FullDiskBackup` en configuración.
+- Permite dos enfoques:
+  - `allCritical` para volúmenes críticos del sistema.
+  - `include` para volúmenes específicos (por ejemplo `C:`, `D:`).
+- Valida que exista destino y que haya criterio válido de selección de volúmenes.
+
+**Selección automática de volúmenes (modo interactivo):**
+- Detecta volúmenes locales automáticamente.
+- Se muestran numerados.
+- Se puede seleccionar por índices (ejemplo: `1,2`), todos con `A` o entrada manual.
+
+**Tareas programadas:**
+- Crea tareas de Windows (`schtasks`) para ejecución automática.
+- Soporta frecuencias: diaria, semanal o mensual.
+- Parámetros configurables: hora, día de semana, día del mes.
+- Ejecuta como `SYSTEM` con privilegios elevados.
+
+**Retención y limpieza:**
+- Eliminación por antigüedad (`RetentionDays`).
+- Eliminación por límite de copias (`MaxBackupSets`).
+
+##### Mejoras de robustez aplicadas
+
+Se corrigieron incidencias detectadas durante pruebas:
+- **Error con `ConfigPath` cuando `$PSScriptRoot` estaba vacío:** Se agregaron rutas de fallback para construir la ruta de configuración.
+- **Error por variable `LogFile` no inicializada bajo `StrictMode`:** Se inicializó `script:LogFile` y se controló escritura condicional.
+- **Error al registrar líneas vacías de salida externa:** Se ignoran líneas vacías de Robocopy, `wbadmin` y `schtasks` antes de loguear.
+
+##### Estructura de configuración JSON
+
+Campos principales disponibles:
+
+| Campo | Descripción |
+|-------|-------------|
+| `DestinationRoot` | Directorio raíz de destino del backup |
+| `CreateTimestampFolder` | Crear subcarpeta con timestamp |
+| `CompressArchive` | Comprimir resultado |
+| `RetentionDays` | Días de retención |
+| `MaxBackupSets` | Número máximo de conjuntos de backup |
+| `LogDirectory` | Directorio de logs |
+| `EnableSystemStateBackup` | Habilitar backup de estado del sistema |
+| `SystemStateTarget` | Destino del backup de estado del sistema |
+| `FullDiskBackup.Enabled` | Habilitar backup completo de disco |
+| `FullDiskBackup.BackupTarget` | Destino del backup completo |
+| `FullDiskBackup.UseAllCritical` | Usar `allCritical` |
+| `FullDiskBackup.IncludeVolumes` | Volúmenes específicos a incluir |
+| `RobocopyThreads` | Hilos de Robocopy |
+| `RobocopyRetryCount` | Reintentos de Robocopy |
+| `RobocopyWaitSeconds` | Segundos de espera entre reintentos |
+| `ScheduledTask.Enabled` | Habilitar tarea programada |
+| `ScheduledTask.Frequency` | Frecuencia (Daily/Weekly/Monthly) |
+| `ScheduledTask.Time` | Hora de ejecución |
+| `ScheduledTask.DayOfWeek` | Día de la semana (si aplica) |
+| `ScheduledTask.DayOfMonth` | Día del mes (si aplica) |
+| `ScheduledTask.TaskName` | Nombre de la tarea |
+| `Sources` | Lista de orígenes para Robocopy |
+
+##### Formas de uso
+
+**Interactivo:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -Interactive
+```
+
+**Interactivo en simulación:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -Interactive -DryRun
+```
+
+**Configuración JSON (por defecto):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1
+```
+
+**Configuración JSON personalizada:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -ConfigPath C:\ruta\mi-config.json
+```
+
+##### Recomendaciones operativas
+
+- Probar siempre primero con `-DryRun`.
+- Evitar usar el mismo volumen como origen y destino de backup completo.
+- Si se usa copia completa, preferir `allCritical` cuando el objetivo sea recuperación del sistema.
+- Verificar periódicamente logs y espacio libre del destino.
 
 ### 4.19. Automatización completa del despliegue
 
@@ -2086,7 +2210,52 @@ El script es seguro ejecutarlo múltiples veces:
 | GPOs (contraseñas, firewall equipos) | | ✅ |
 | Políticas de auditoría avanzada | | ✅ |
 
-### 4.20. Verificación y pruebas de conectividad
+
+
+---
+
+## 5. Pruebas y validación
+
+### 5.1. Plan de pruebas
+
+**Objetivo:** Verificar que todos los requisitos funcionales (RF) y no funcionales (RNF) definidos en la sección 2 se cumplen en el entorno desplegado.
+
+**Alcance:**
+- Infraestructura AWS (VPC, subredes, tablas de rutas, Security Groups).
+- Conectividad de red (NAT, VPN, DNS, enrutamiento interno).
+- Servicios críticos (Active Directory, monitorización, alertas, portal web).
+- Seguridad perimetral (iptables, Security Groups, GPOs, auditoría).
+- Recuperación ante fallos (backups, reinicios, alertas de caída).
+
+**Tipos de pruebas:**
+
+| Tipo | Descripción |
+|------|-------------|
+| **Funcionales** | Validación de requisitos RF-01 a RF-09 (conectividad, despliegue, seguridad, monitorización, AD, VPN, alertas, acceso remoto). |
+| **Rendimiento / Carga** | Estrés del Gateway (NAT + VPN simultáneo), consumo de recursos en Windows Server, throughput de red. |
+| **Seguridad** | Validación de firewall, escaneo de puertos, auditoría de logs, intento de acceso no autorizado. |
+| **Disponibilidad / Recuperación** | Reinicio de servicios, simulación de caída, validación de backups, recuperación DSRM. |
+| **Integración** | Flujo end-to-end: VPN → AD → DNS → Portal web → API de altas. |
+
+**Herramientas utilizadas:**
+- Scripts personalizados y utilidades del sistema (`ping`, `tracert`, `nslookup`, `curl`).
+- `amtool` para pruebas de alertas de Alertmanager.
+- Grafana dashboards para validación visual de métricas.
+- `nmap` para escaneo de puertos (seguridad).
+- `wbadmin` para validación de backups.
+- Sysmon y logs de iptables para auditoría.
+
+**Criterios de aceptación generales:**
+- Todos los servicios accesibles desde los perfiles de usuario autorizados (matriz de acceso de la sección 2.3).
+- Métricas recolectadas en Prometheus sin errores de scraping.
+- Alertas entregadas al canal de Telegram configurado.
+- Conectividad end-to-end validada (Internet ↔ Gateway ↔ Windows Server ↔ Cliente VPN).
+- Recuperación ante reinicio confirmada para servicios críticos.
+- Infraestructura recreable de forma idéntica mediante CloudFormation (GitOps).
+
+---
+
+### 5.2. Verificación y pruebas de conectividad
 
 Esta sección documenta la validación final de la infraestructura desplegada, verificando la conectividad de red desde el Windows Server hacia Internet, el Gateway y los servicios internos. Las pruebas acreditan el correcto funcionamiento del NAT, el routing, la resolución DNS y la conectividad VPN.
 
@@ -2164,61 +2333,20 @@ Los targets esperados deben mostrar estado `health: "up"`:
 
 ---
 
-## 5. Pruebas y validación
-
-### 5.1. Plan de pruebas
-
-**Objetivo:** Verificar que todos los requisitos funcionales (RF) y no funcionales (RNF) definidos en la sección 2 se cumplen en el entorno desplegado.
-
-**Alcance:**
-- Infraestructura AWS (VPC, subredes, tablas de rutas, Security Groups).
-- Conectividad de red (NAT, VPN, DNS, enrutamiento interno).
-- Servicios críticos (Active Directory, monitorización, alertas, portal web).
-- Seguridad perimetral (iptables, Security Groups, GPOs, auditoría).
-- Recuperación ante fallos (backups, reinicios, alertas de caída).
-
-**Tipos de pruebas:**
-
-| Tipo | Descripción |
-|------|-------------|
-| **Funcionales** | Validación de requisitos RF-01 a RF-09 (conectividad, despliegue, seguridad, monitorización, AD, VPN, alertas, acceso remoto). |
-| **Rendimiento / Carga** | Estrés del Gateway (NAT + VPN simultáneo), consumo de recursos en Windows Server, throughput de red. |
-| **Seguridad** | Validación de firewall, escaneo de puertos, auditoría de logs, intento de acceso no autorizado. |
-| **Disponibilidad / Recuperación** | Reinicio de servicios, simulación de caída, validación de backups, recuperación DSRM. |
-| **Integración** | Flujo end-to-end: VPN → AD → DNS → Portal web → API de altas. |
-
-**Herramientas utilizadas:**
-- Scripts personalizados y utilidades del sistema (`ping`, `tracert`, `nslookup`, `curl`).
-- `amtool` para pruebas de alertas de Alertmanager.
-- Grafana dashboards para validación visual de métricas.
-- `nmap` para escaneo de puertos (seguridad).
-- `wbadmin` para validación de backups.
-- Sysmon y logs de iptables para auditoría.
-
-**Criterios de aceptación generales:**
-- Todos los servicios accesibles desde los perfiles de usuario autorizados (matriz de acceso de la sección 2.3).
-- Métricas recolectadas en Prometheus sin errores de scraping.
-- Alertas entregadas al canal de Telegram configurado.
-- Conectividad end-to-end validada (Internet ↔ Gateway ↔ Windows Server ↔ Cliente VPN).
-- Recuperación ante reinicio confirmada para servicios críticos.
-- Infraestructura recreable de forma idéntica mediante CloudFormation (GitOps).
-
----
-
-### 5.2. Pruebas funcionales
+### 5.3. Pruebas funcionales
 
 Esta sección documenta la validación de cada requisito funcional mediante pruebas ejecutadas sobre el entorno desplegado.
 
 | Requisito | Prueba ejecutada | Estado | Evidencia |
 |-----------|------------------|--------|-----------|
-| **RF-01** (Enrutamiento NAT) | `tracert 8.8.8.8`, `tracert google.com`, `ping 10.0.2.1` desde Windows Server | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-01** (Enrutamiento NAT) | `tracert 8.8.8.8`, `tracert google.com`, `ping 10.0.2.1` desde Windows Server | ✅ Validado | Sección 5.2 |
 | **RF-02** (Despliegue automatizado) | Despliegue completo del stack CloudFormation sin intervención manual; validación de parámetros y eventos de creación | ✅ Validado | Ver imágenes debajo |
 | **RF-03** (Seguridad de red) | Revisión de reglas iptables en Gateway y Security Groups de AWS | ✅ Validado | Ver sección 5.4 |
 | **RF-04** (Monitorización de tráfico) | Verificación de métricas `node_network_*` en Prometheus | ✅ Validado | Dashboard Grafana |
-| **RF-05** (Dashboard unificado) | Acceso a Grafana vía VPN, visualización de métricas de ambos servidores | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
-| **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-05** (Dashboard unificado) | Acceso a Grafana vía VPN, visualización de métricas de ambos servidores | ✅ Validado | Sección 5.2 |
+| **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna | ✅ Validado | Sección 5.2 |
 | **RF-07** (Acceso VPN) | Conexión WireGuard, acceso a `10.0.2.0/24` y `172.16.3.0/24` desde cliente | ✅ Validado | Ver sección 5.4 |
-| **RF-08** (Gestión de alertas) | Alerta `InstanceDown` simulada y recepción en Telegram | ✅ Validado | Sección 4.20 (se mantiene en implantación) |
+| **RF-08** (Gestión de alertas) | Alerta `InstanceDown` simulada y recepción en Telegram | ✅ Validado | Sección 5.2 |
 | **RF-09** (Acceso remoto) | SSH al Gateway (puerto 22), RDP al Windows vía VPN (3389) y DNAT desde Internet | ✅ Validado | Conectividad verificada |
 
 #### Validación del despliegue automatizado (RF-02)
@@ -2235,11 +2363,11 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 
 *Figura: Cronograma de eventos de CloudFormation que acredita la creación automática de la VPC, subredes, Security Groups, instancias y volúmenes.*
 
-> **Nota:** Las pruebas de conectividad específicas (tracert, ping, nslookup, dashboards y alertas) se mantienen documentadas en la sección **4.20. Verificación y pruebas de conectividad** para no duplicar contenido del manual de implantación. Los resultados obtenidos fueron satisfactorios y acreditan el cumplimiento de RF-01, RF-05, RF-06, RF-08 y RF-09.
+> **Nota:** Las pruebas de conectividad específicas (tracert, ping, nslookup, dashboards y alertas) se mantienen documentadas en la sección **5.2. Verificación y pruebas de conectividad** para no duplicar contenido del manual de implantación. Los resultados obtenidos fueron satisfactorios y acreditan el cumplimiento de RF-01, RF-05, RF-06, RF-08 y RF-09.
 
 ---
 
-### 5.3. Pruebas de rendimiento y carga
+### 5.4. Pruebas de rendimiento y carga
 
 **Objetivo:** Validar que el sistema mantiene un rendimiento aceptable bajo condiciones de uso simultáneo y que no se degradan los servicios críticos.
 
@@ -2250,11 +2378,11 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 | Estrés del Gateway Ubuntu | NAT simultáneo para subred privada + túnel VPN activo con tráfico de cliente | Latencia interna < 5 ms, sin pérdida de paquetes | ⏳ Pendiente de imagen |
 | Consumo de recursos Windows | Monitorización de CPU y memoria del DC bajo carga de autenticación | CPU < 90 %, memoria disponible > 10 % | ⏳ Pendiente de imagen |
 | Throughput WireGuard | Transferencia de archivos entre cliente VPN y subred privada | Velocidad estable sin caídas de túnel | ⏳ Pendiente de imagen |
-| Latencia de enrutamiento interno | `ping` sostenido entre Gateway (`10.0.2.1`) y Windows Server (`10.0.2.75`) | Latencia < 1 ms, 0 % packet loss | ✅ Validado (sección 4.20) |
+| Latencia de enrutamiento interno | `ping` sostenido entre Gateway (`10.0.2.1`) y Windows Server (`10.0.2.75`) | Latencia < 1 ms, 0 % packet loss | ✅ Validado (sección 5.2) |
 
 ---
 
-### 5.4. Pruebas de seguridad
+### 5.5. Pruebas de seguridad
 
 **Objetivo:** Verificar que las capas de seguridad implementadas (perimetral, de red y de sistema) funcionan correctamente y que no existen vectores de acceso no autorizado.
 
@@ -2272,7 +2400,7 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 
 ---
 
-### 5.5. Pruebas de disponibilidad y recuperación
+### 5.6. Pruebas de disponibilidad y recuperación
 
 **Objetivo:** Confirmar que los servicios críticos se recuperan correctamente ante reinicios y que existe capacidad de restauración ante fallos.
 
@@ -2282,20 +2410,20 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 |--------|-------------|--------------------|--------|
 | Reinicio de servicios críticos (Ubuntu) | `systemctl restart prometheus grafana-server wg-quick@wg0` | Servicios activos en < 10 s, métricas sin pérdida de datos históricos | ✅ Validado |
 | Reinicio de servicios críticos (Windows) | `Restart-Service TermService`, reciclaje de IIS | RDP y portal web operativos tras reinicio | ⏳ Pendiente de imagen |
-| Simulación de caída de instancia Windows | Parada controlada del Windows Server, observación de alertas y recuperación | Alerta `InstanceDown` en Telegram en < 1 min; Prometheus marca target como `down` | ✅ Validado (sección 4.20) |
+| Simulación de caída de instancia Windows | Parada controlada del Windows Server, observación de alertas y recuperación | Alerta `InstanceDown` en Telegram en < 1 min; Prometheus marca target como `down` | ✅ Validado (sección 5.2) |
 | Validación de backup | Ejecución de `wbadmin get versions -backuptarget:E:` | Al menos una versión de System State disponible | ⏳ Pendiente de imagen |
 | Recuperación en DSRM (teórico/práctico) | Arranque en Directory Services Restore Mode, acceso con contraseña DSRM | Acceso al modo de recuperación funcional | ⏳ Pendiente de imagen |
 | Reconstrucción idempotente del entorno | Eliminación y recreación del stack CloudFormation | Entorno funcionalmente idéntico tras 15-20 minutos | ✅ Validado (diseño GitOps, sección 4.6) |
 
 ---
 
-### 5.6. Informe de resultados y correcciones aplicadas
+### 5.7. Informe de resultados y correcciones aplicadas
 
 #### Resumen de resultados por requisito
 
 | Requisito | Descripción | Estado | Notas |
 |-----------|-------------|--------|-------|
-| RF-01 | Enrutamiento NAT | ✅ Validado | Tracert, ping y DNS operativos (sección 4.20) |
+| RF-01 | Enrutamiento NAT | ✅ Validado | Tracert, ping y DNS operativos (sección 5.2) |
 | RF-02 | Despliegue automatizado | ✅ Validado | CloudFormation despliega sin intervención manual; parámetros validados |
 | RF-03 | Seguridad de red | ✅ Validado | iptables + Security Groups operativos |
 | RF-04 | Monitorización de tráfico | ✅ Validado | Métricas de red visibles en Grafana |
