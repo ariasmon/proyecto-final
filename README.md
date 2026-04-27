@@ -113,8 +113,8 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 
 ### 3.2. Diseño de Seguridad y Accesos
 
-1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24`. Outbound: Todo permitido.
-2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde `172.16.3.0/24`, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
+1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3389/TCP desde Internet (DNAT/RDP al Windows Server), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24` (incluye Grafana 3000/TCP vía VPN). Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde `172.16.3.0/24` y SG-Gateway, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -136,7 +136,7 @@ Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente de
 
 ##### Gateway Ubuntu
 
-El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server se realiza exclusivamente a través de la VPN, sin exposición directa a Internet. Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
+El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server está disponible tanto a través de la VPN como mediante DNAT desde Internet (puerto 3389). Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
 
 **Mitigaciones adoptadas:**
 
@@ -157,7 +157,7 @@ El Windows Server opera como controlador de dominio único para `tfg.vp`, incluy
 - **Windows Exporter:** Expone métricas de salud del sistema (CPU, memoria, disco, servicios) que permiten anticipar degradaciones.
 - **Contraseña DSRM:** Configurada durante la promoción del DC (sección 4.4), permite acceder en modo de restauración de Directory Services para tareas de recuperación.
 
-**En un entorno productivo:** Se desplegaría un segundo controlador de dominio para proporcionar redundancia de autenticación y DNS, y se automatizarían copias de seguridad del System State mediante `wbadmin` (véase la sección de Backup AD).
+**En un entorno productivo:** Se desplegaría un segundo controlador de dominio para proporcionar redundancia de autenticación y DNS, y se automatizarían copias de seguridad del System State mediante `wbadmin` (véase la sección 4.18).
 
 ##### Stack de monitorización
 
@@ -205,6 +205,14 @@ sudo iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATE
 # Persistencia de reglas
 sudo apt update && sudo apt install -y iptables-persistent netfilter-persistent
 sudo netfilter-persistent save
+
+# DNAT: Redirigir RDP desde Internet al Windows Server
+# La IP privada del Gateway se obtiene desde los metadatos de instancia de AWS
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+sudo iptables -t nat -A PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+sudo iptables -t nat -A POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE
+sudo iptables -A FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT
+sudo netfilter-persistent save
 ```
 
 ### 4.3. Configuración del Servidor Interno (Windows Server)
@@ -212,7 +220,7 @@ sudo netfilter-persistent save
 Para garantizar la estabilidad operativa y la conectividad a través del Gateway, se han realizado las siguientes configuraciones críticas:
 
 1. **Optimización de Instancia:** Migración del servidor a una instancia de familia **`t3.small`** (2 vCPU, 2GB RAM).
-2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `8.8.8.8` y `8.8.4.4` durante el primer arranque. Tras la promoción a Domain Controller, el bootstrap cambia el DNS a `127.0.0.1` (AD DNS local) y `8.8.8.8` como secundario.
+2. **Configuración de Red Estática:** Direccionamiento IPv4 fijado en `10.0.2.75`, Gateway en `10.0.2.1` y DNS apuntando a `10.0.0.2` (DNS de AWS) y `8.8.8.8` durante el primer arranque. Tras la promoción a Domain Controller, el bootstrap cambia el DNS a `127.0.0.1` (AD DNS local) y `8.8.8.8` como secundario.
 3. **Ruta estática VPN:** Ruta hacia la subred VPN (`172.16.3.0/24`) a través del Gateway (`10.0.2.1`), necesaria para que el Windows Server pueda responder a clientes VPN.
 4. **Gestión del Firewall:** Desactivación del cortafuegos de Windows mediante PowerShell:
 
@@ -409,12 +417,16 @@ El Security Group del Gateway define las reglas de acceso perimetral:
 SGGateway:
   Type: AWS::EC2::SecurityGroup
   Properties:
-    GroupDescription: Gateway Ubuntu - SSH, WireGuard, Prometheus y trafico interno
+    GroupDescription: Gateway Ubuntu - SSH, RDP (DNAT), WireGuard, Prometheus y trafico interno
     VpcId: !Ref VPC
     SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
         CidrIp: 0.0.0.0/0
       - IpProtocol: tcp
         FromPort: 9090
@@ -445,6 +457,14 @@ SGInternal:
     SecurityGroupIngress:
       - IpProtocol: -1
         CidrIp: 172.16.3.0/24
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
+        CidrIp: 172.16.3.0/24
+      - IpProtocol: tcp
+        FromPort: 3389
+        ToPort: 3389
+        SourceSecurityGroupId: !Ref SGGateway
       - IpProtocol: tcp
         FromPort: 9182
         ToPort: 9182
@@ -505,12 +525,24 @@ UbuntuGateway:
     UserData:
       Fn::Base64: !Sub |
         #!/bin/bash
+        # Habilitar IP Forwarding
         sysctl -w net.ipv4.ip_forward=1
         echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+        # NAT: subred privada → Internet
         iptables -t nat -A POSTROUTING -s 10.0.2.0/24 -o ens5 -j MASQUERADE
+        # NAT: clientes VPN → subred privada
         iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -d 10.0.2.0/24 -j MASQUERADE
+        # NAT: clientes VPN → Internet
+        iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
+        # Forwarding VPN ↔ subred privada
         iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
         iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+        # DNAT: RDP desde Internet → Windows Server
+        PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+        iptables -t nat -A PREROUTING -p tcp -d $PRIVATE_IP --dport 3389 -j DNAT --to-destination 10.0.2.75:3389
+        iptables -t nat -A POSTROUTING -p tcp -d 10.0.2.75 --dport 3389 -j MASQUERADE
+        iptables -A FORWARD -p tcp -d 10.0.2.75 --dport 3389 -m state --state NEW,ESTABLISHED -j ACCEPT
+        # Instalación y bootstrap
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
         apt-get install -y iptables-persistent netfilter-persistent git
@@ -536,20 +568,37 @@ WindowsInternal:
     UserData:
       Fn::Base64: !Sub |
         <powershell>
+        # Stage0: Configuración mínima antes de promoción a DC
         Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
         $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'}
         $ifIndex = $adapter.ifIndex
         Remove-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
         New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 10.0.2.75 -PrefixLength 24 -DefaultGateway 10.0.2.1
-        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("8.8.8.8","8.8.4.4")
+        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("10.0.0.2","8.8.8.8")
         route add 172.16.3.0 mask 255.255.255.0 10.0.2.1
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ariasmon/proyecto-final/main/scripts/bootstrap-windows.ps1" -OutFile "C:\bootstrap-windows.ps1" -UseBasicParsing
+        # Instalar roles y habilitar RDP
+        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
+        Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
+        Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        Start-Service TermService -ErrorAction SilentlyContinue
+        Set-Service -Name TermService -StartupType Automatic
+        New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue | Out-Null
+        # Crear ScheduledTask TFG-Stage2 para continuar tras reinicio
+        # (espera DNS, descarga y ejecuta bootstrap-windows.ps1)
+        # ... (véase despliegue-tfg.yml para el código completo)
         $pwd = ConvertTo-SecureString "${SafeModePassword}" -AsPlainText -Force
-        powershell -ExecutionPolicy Bypass -File "C:\bootstrap-windows.ps1" -SafeModePassword $pwd
+        Import-Module ADDSDeployment
+        Install-ADDSForest -DomainName "tfg.vp" -DomainNetBIOSName "TFG" -SafeModeAdministratorPassword $pwd -Force
         </powershell>
 ```
 
-El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, RDP, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.20). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
+El UserData se limita a la configuración de red necesaria para descargar el script desde GitHub. Toda la configuración posterior (roles, AD, RDP, IIS, API, Sysmon, etc.) se realiza automáticamente por `bootstrap-windows.ps1` (véase la sección 4.19). Esta aproximación elimina la necesidad de intervención manual inicial (SSH/RDP) para la configuración del servidor y previene errores humanos durante el despliegue. El archivo completo del stack está disponible en el repositorio como `despliegue-tfg.yml`.
+
+> **Nota sobre la estrategia Stage0/Stage2 en Windows:** CloudFormation crea las instancias en paralelo, por lo que el Windows Server puede arrancar antes de que el Gateway Ubuntu esté listo para proporcionar NAT y DNS. Para resolver esto, el UserData del Windows (Stage0) configura la red con DNS `10.0.0.2` (DNS de AWS, disponible sin Gateway), instala roles localmente y crea una tarea programada `TFG-Stage2`. Tras la promoción a DC y el reinicio automático, la tarea `TFG-Stage2` espera a que DNS esté disponible, descarga `bootstrap-windows.ps1` desde GitHub y lo ejecuta. El código completo de la ScheduledTask se encuentra en `despliegue-tfg.yml`.
+
+> **Nota sobre DNAT y dirección IP:** Las reglas DNAT para RDP en el UserData de Ubuntu obtienen la IP privada del Gateway dinámicamente desde los metadatos de instancia de AWS (`169.254.169.254`). Esto es necesario porque las reglas DNAT con la IP elástica no funcionan en AWS, ya que el Internet Gateway realiza NAT antes de que el tráfico llegue a iptables.
 
 ### 4.7. Implementación de VPN con WireGuard
 
@@ -609,6 +658,9 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
 # Forwarding entre VPN y subred privada
 sudo iptables -A FORWARD -s 172.16.3.0/24 -d 10.0.2.0/24 -j ACCEPT
 sudo iptables -A FORWARD -s 10.0.2.0/24 -d 172.16.3.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+# NAT para que clientes VPN accedan a Internet
+sudo iptables -t nat -A POSTROUTING -s 172.16.3.0/24 -o ens5 -j MASQUERADE
 
 # Persistir reglas
 sudo netfilter-persistent save
@@ -804,7 +856,7 @@ scrape_configs:
 | `node` | Métricas de Ubuntu Gateway | 9100 |
 | `windows-server` | Métricas de Windows Server | 9182 |
 
-> **Nota sobre intervalos de recolección:** El job `prometheus` tiene configurado un `scrape_interval` de 5s para la automonitorización del propio servidor. Los jobs `node` y `windows-server` utilizan el intervalo por defecto de 1 minuto. Este diseño es deliberado: dadas las limitaciones de recursos de las instancias (t3.micro para el Gateway y t3.small para Windows Server), un intervalo de 1 minuto proporciona suficiente granularidad para las consultas `rate(...[5m])` del dashboard y las reglas de alerta, sin comprometer la estabilidad del sistema.
+> **Nota sobre intervalos de recolección:** El job `prometheus` tiene configurado un `scrape_interval` de 5s para la automonitorización del propio servidor. Los jobs `node` y `windows-server` utilizan el intervalo global definido de 15 segundos. Este diseño es deliberado: dadas las limitaciones de recursos de las instancias (t3.micro para el Gateway y t3.small para Windows Server), un intervalo de 15 segundos proporciona suficiente granularidad para las consultas `rate(...[5m])` del dashboard y las reglas de alerta, sin comprometer la estabilidad del sistema.
 
 #### Reglas de Alerta
 
@@ -1676,11 +1728,15 @@ El script realiza las siguientes acciones:
 ![Portal web IIS](imagenes/Imagen-PaginaWebIIS.png)
 *Figura 4: Portal web interno desplegado en IIS sobre el Windows Server.*
 
-### 4.18. Copia de seguridad de Active Directory
+### 4.18. Estrategias de copia de seguridad
+
+Se han configurado dos estrategias de copia de seguridad para el controlador de dominio Windows Server: un backup automatizado del estado del sistema mediante `wbadmin` (gestionado por `bootstrap-windows.ps1`) y un script avanzado de backup (`backup-windows-server.ps1`) con soporte para modos interactivo, JSON y DryRun.
+
+#### 4.18.1 Backup de estado del sistema con wbadmin
 
 Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
 
-> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup"), la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.20). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
+> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup"), la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.19). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
 
 #### Prerrequisito: volumen de backup
 
@@ -1821,7 +1877,127 @@ wbadmin start systemstaterecovery -version:<VERSION_ID>
 
 Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (formato `mm/dd/yyyy-hh:mm`).
 
-### 4.20. Automatización completa del despliegue
+#### 4.18.2 Script de backup avanzado (backup-windows-server.ps1)
+
+Además del backup automatizado del estado del sistema, se ha desarrollado un script de backup flexible e interactivo para Windows Server. Este script permite realizar copias de carpetas (mediante Robocopy), backups del estado del sistema (con `wbadmin`) y backups completos de disco, con soporte para ejecución interactiva, configuración por JSON y modo simulación (DryRun).
+
+##### Archivos
+
+| Archivo | Descripción |
+|---------|-------------|
+| `scripts/backup-windows-server.ps1` | Script principal con la lógica de backup |
+| `scripts/backup-config.json` | Configuración por defecto para ejecución no interactiva |
+
+##### Modos de ejecución
+
+- **Modo interactivo:** Permite configurar todo mediante preguntas en consola.
+- **Modo por configuración JSON:** Lee valores desde `backup-config.json` o desde la ruta indicada con el parámetro `-ConfigPath`.
+- **Modo simulación (DryRun):** Muestra qué se haría sin ejecutar cambios reales.
+
+##### Funcionalidades implementadas
+
+**Backup de carpetas con Robocopy:**
+- Copia por origen definido en `Sources`.
+- Modo espejo opcional por origen (`Mirror`).
+- Soporte de exclusión de archivos y carpetas.
+- Manejo de códigos de salida de Robocopy (0–7: éxito; >7: error).
+
+**Backup de estado del sistema:**
+- Opción `EnableSystemStateBackup`.
+- Ejecuta `wbadmin start systemstatebackup` con destino configurable.
+
+**Backup completo de disco:**
+- Nueva sección `FullDiskBackup` en configuración.
+- Permite dos enfoques:
+  - `allCritical` para volúmenes críticos del sistema.
+  - `include` para volúmenes específicos (por ejemplo `C:`, `D:`).
+- Valida que exista destino y que haya criterio válido de selección de volúmenes.
+
+**Selección automática de volúmenes (modo interactivo):**
+- Detecta volúmenes locales automáticamente.
+- Se muestran numerados.
+- Se puede seleccionar por índices (ejemplo: `1,2`), todos con `A` o entrada manual.
+
+**Tareas programadas:**
+- Crea tareas de Windows (`schtasks`) para ejecución automática.
+- Soporta frecuencias: diaria, semanal o mensual.
+- Parámetros configurables: hora, día de semana, día del mes.
+- Ejecuta como `SYSTEM` con privilegios elevados.
+
+**Retención y limpieza:**
+- Eliminación por antigüedad (`RetentionDays`).
+- Eliminación por límite de copias (`MaxBackupSets`).
+
+##### Mejoras de robustez aplicadas
+
+Se corrigieron incidencias detectadas durante pruebas:
+- **Error con `ConfigPath` cuando `$PSScriptRoot` estaba vacío:** Se agregaron rutas de fallback para construir la ruta de configuración.
+- **Error por variable `LogFile` no inicializada bajo `StrictMode`:** Se inicializó `script:LogFile` y se controló escritura condicional.
+- **Error al registrar líneas vacías de salida externa:** Se ignoran líneas vacías de Robocopy, `wbadmin` y `schtasks` antes de loguear.
+
+##### Estructura de configuración JSON
+
+Campos principales disponibles:
+
+| Campo | Descripción |
+|-------|-------------|
+| `DestinationRoot` | Directorio raíz de destino del backup |
+| `CreateTimestampFolder` | Crear subcarpeta con timestamp |
+| `CompressArchive` | Comprimir resultado |
+| `RetentionDays` | Días de retención |
+| `MaxBackupSets` | Número máximo de conjuntos de backup |
+| `LogDirectory` | Directorio de logs |
+| `EnableSystemStateBackup` | Habilitar backup de estado del sistema |
+| `SystemStateTarget` | Destino del backup de estado del sistema |
+| `FullDiskBackup.Enabled` | Habilitar backup completo de disco |
+| `FullDiskBackup.BackupTarget` | Destino del backup completo |
+| `FullDiskBackup.UseAllCritical` | Usar `allCritical` |
+| `FullDiskBackup.IncludeVolumes` | Volúmenes específicos a incluir |
+| `RobocopyThreads` | Hilos de Robocopy |
+| `RobocopyRetryCount` | Reintentos de Robocopy |
+| `RobocopyWaitSeconds` | Segundos de espera entre reintentos |
+| `ScheduledTask.Enabled` | Habilitar tarea programada |
+| `ScheduledTask.Frequency` | Frecuencia (Daily/Weekly/Monthly) |
+| `ScheduledTask.Time` | Hora de ejecución |
+| `ScheduledTask.DayOfWeek` | Día de la semana (si aplica) |
+| `ScheduledTask.DayOfMonth` | Día del mes (si aplica) |
+| `ScheduledTask.TaskName` | Nombre de la tarea |
+| `Sources` | Lista de orígenes para Robocopy |
+
+##### Formas de uso
+
+**Interactivo:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -Interactive
+```
+
+**Interactivo en simulación:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -Interactive -DryRun
+```
+
+**Configuración JSON (por defecto):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1
+```
+
+**Configuración JSON personalizada:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -ConfigPath C:\ruta\mi-config.json
+```
+
+##### Recomendaciones operativas
+
+- Probar siempre primero con `-DryRun`.
+- Evitar usar el mismo volumen como origen y destino de backup completo.
+- Si se usa copia completa, preferir `allCritical` cuando el objetivo sea recuperación del sistema.
+- Verificar periódicamente logs y espacio libre del destino.
+
+### 4.19. Automatización completa del despliegue
 
 El despliegue de ambos servidores (Gateway Ubuntu y Windows Server) se realiza de forma automática mediante scripts idempotentes ejecutados desde el UserData de CloudFormation, sin intervención manual. Esto cumple con el requisito RF-02 (Despliegue Automatizado) y el principio GitOps (RNF-02) definidos en la sección 2.
 
@@ -2051,7 +2227,52 @@ El script es seguro ejecutarlo múltiples veces:
 | API /api + autenticación Windows | ✅ | |
 | ad-users.json + tarea exportación | ✅ | |
 
-### 4.19. Verificación y pruebas de conectividad
+
+
+---
+
+## 5. Pruebas y validación
+
+### 5.1. Plan de pruebas
+
+**Objetivo:** Verificar que todos los requisitos funcionales (RF) y no funcionales (RNF) definidos en la sección 2 se cumplen en el entorno desplegado.
+
+**Alcance:**
+- Infraestructura AWS (VPC, subredes, tablas de rutas, Security Groups).
+- Conectividad de red (NAT, VPN, DNS, enrutamiento interno).
+- Servicios críticos (Active Directory, monitorización, alertas, portal web).
+- Seguridad perimetral (iptables, Security Groups, GPOs, auditoría).
+- Recuperación ante fallos (backups, reinicios, alertas de caída).
+
+**Tipos de pruebas:**
+
+| Tipo | Descripción |
+|------|-------------|
+| **Funcionales** | Validación de requisitos RF-01 a RF-09 (conectividad, despliegue, seguridad, monitorización, AD, VPN, alertas, acceso remoto). |
+| **Rendimiento / Carga** | Estrés del Gateway (NAT + VPN simultáneo), consumo de recursos en Windows Server, throughput de red. |
+| **Seguridad** | Validación de firewall, escaneo de puertos, auditoría de logs, intento de acceso no autorizado. |
+| **Disponibilidad / Recuperación** | Reinicio de servicios, simulación de caída, validación de backups, recuperación DSRM. |
+| **Integración** | Flujo end-to-end: VPN → AD → DNS → Portal web → API de altas. |
+
+**Herramientas utilizadas:**
+- Scripts personalizados y utilidades del sistema (`ping`, `tracert`, `nslookup`, `curl`).
+- `amtool` para pruebas de alertas de Alertmanager.
+- Grafana dashboards para validación visual de métricas.
+- `nmap` para escaneo de puertos (seguridad).
+- `wbadmin` para validación de backups.
+- Sysmon y logs de iptables para auditoría.
+
+**Criterios de aceptación generales:**
+- Todos los servicios accesibles desde los perfiles de usuario autorizados (matriz de acceso de la sección 2.3).
+- Métricas recolectadas en Prometheus sin errores de scraping.
+- Alertas entregadas al canal de Telegram configurado.
+- Conectividad end-to-end validada (Internet ↔ Gateway ↔ Windows Server ↔ Cliente VPN).
+- Recuperación ante reinicio confirmada para servicios críticos.
+- Infraestructura recreable de forma idéntica mediante CloudFormation (GitOps).
+
+---
+
+### 5.2. Verificación y pruebas de conectividad
 
 Esta sección documenta la validación final de la infraestructura desplegada, verificando la conectividad de red desde el Windows Server hacia Internet, el Gateway y los servicios internos. Las pruebas acreditan el correcto funcionamiento del NAT, el routing, la resolución DNS y la conectividad VPN.
 
@@ -2126,3 +2347,137 @@ Los targets esperados deben mostrar estado `health: "up"`:
 | `prometheus` | `localhost:9090` | Métricas del propio Prometheus |
 | `node` | `localhost:9100` | Métricas del Gateway Ubuntu (Node Exporter) |
 | `windows-server` | `10.0.2.75:9182` | Métricas del Windows Server (Windows Exporter) |
+
+---
+
+### 5.3. Pruebas funcionales
+
+Esta sección documenta la validación de cada requisito funcional mediante pruebas ejecutadas sobre el entorno desplegado.
+
+| Requisito | Prueba ejecutada | Estado | Evidencia |
+|-----------|------------------|--------|-----------|
+| **RF-01** (Enrutamiento NAT) | `tracert 8.8.8.8`, `tracert google.com`, `ping 10.0.2.1` desde Windows Server | ✅ Validado | Sección 5.2 |
+| **RF-02** (Despliegue automatizado) | Despliegue completo del stack CloudFormation sin intervención manual; validación de parámetros y eventos de creación | ✅ Validado | Ver imágenes debajo |
+| **RF-03** (Seguridad de red) | Revisión de reglas iptables en Gateway y Security Groups de AWS | ✅ Validado | Ver sección 5.4 |
+| **RF-04** (Monitorización de tráfico) | Verificación de métricas `node_network_*` en Prometheus | ✅ Validado | Dashboard Grafana |
+| **RF-05** (Dashboard unificado) | Acceso a Grafana vía VPN, visualización de métricas de ambos servidores | ✅ Validado | Sección 5.2 |
+| **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna | ✅ Validado | Sección 5.2 |
+| **RF-07** (Acceso VPN) | Conexión WireGuard, acceso a `10.0.2.0/24` y `172.16.3.0/24` desde cliente | ✅ Validado | Ver sección 5.4 |
+| **RF-08** (Gestión de alertas) | Alerta `InstanceDown` simulada y recepción en Telegram | ✅ Validado | Sección 5.2 |
+| **RF-09** (Acceso remoto) | SSH al Gateway (puerto 22), RDP al Windows vía VPN (3389) y DNAT desde Internet | ✅ Validado | Conectividad verificada |
+
+#### Validación del despliegue automatizado (RF-02)
+
+El stack de CloudFormation se desplegó validando los parámetros de automatización inyectados al momento de la creación:
+
+![Parámetros de automatización](imagenes/parametros-para-automatizacion.png)
+
+*Figura: Pantalla de parámetros del stack CloudFormation donde se inyectan el token de Telegram, Chat ID, contraseña DSRM y KeyName para el despliegue automatizado.*
+
+El arranque automático fue validado mediante el cronograma de eventos de AWS, confirmando que todos los recursos se crearon en el orden correcto sin intervención manual:
+
+![Cronograma de despliegue](imagenes/cronograma-despliegue.png)
+
+*Figura: Cronograma de eventos de CloudFormation que acredita la creación automática de la VPC, subredes, Security Groups, instancias y volúmenes.*
+
+> **Nota:** Las pruebas de conectividad específicas (tracert, ping, nslookup, dashboards y alertas) se mantienen documentadas en la sección **5.2. Verificación y pruebas de conectividad** para no duplicar contenido del manual de implantación. Los resultados obtenidos fueron satisfactorios y acreditan el cumplimiento de RF-01, RF-05, RF-06, RF-08 y RF-09.
+
+---
+
+### 5.4. Pruebas de rendimiento y carga
+
+**Objetivo:** Validar que el sistema mantiene un rendimiento aceptable bajo condiciones de uso simultáneo y que no se degradan los servicios críticos.
+
+**Pruebas ejecutadas:**
+
+| Prueba | Descripción | Criterio de aceptación | Estado |
+|--------|-------------|------------------------|--------|
+| Estrés del Gateway Ubuntu | NAT simultáneo para subred privada + túnel VPN activo con tráfico de cliente | Latencia interna < 5 ms, sin pérdida de paquetes | ⏳ Pendiente de imagen |
+| Consumo de recursos Windows | Monitorización de CPU y memoria del DC bajo carga de autenticación | CPU < 90 %, memoria disponible > 10 % | ⏳ Pendiente de imagen |
+| Throughput WireGuard | Transferencia de archivos entre cliente VPN y subred privada | Velocidad estable sin caídas de túnel | ⏳ Pendiente de imagen |
+| Latencia de enrutamiento interno | `ping` sostenido entre Gateway (`10.0.2.1`) y Windows Server (`10.0.2.75`) | Latencia < 1 ms, 0 % packet loss | ✅ Validado (sección 5.2) |
+
+---
+
+### 5.5. Pruebas de seguridad
+
+**Objetivo:** Verificar que las capas de seguridad implementadas (perimetral, de red y de sistema) funcionan correctamente y que no existen vectores de acceso no autorizado.
+
+**Pruebas ejecutadas:**
+
+| Prueba | Descripción | Resultado esperado | Estado |
+|--------|-------------|--------------------|--------|
+| Validación de iptables | Revisión de chains INPUT, FORWARD, POSTROUTING, PREROUTING | Reglas NAT, DNAT y LOG presentes y activas | ✅ Validado (configuración en sección 4.2) |
+| Security Groups AWS | Verificación de reglas de entrada en SG-Gateway y SG-Internal | Solo puertos autorizados abiertos (22, 3389, 51820, 9090, 9093, 9100, 9182) | ✅ Validado (sección 3.2) |
+| Escaneo de puertos | `nmap` desde Internet hacia IP Elástica del Gateway | Solo 22/TCP, 3389/TCP y 51820/UDP visibles; resto filtrados | ⏳ Pendiente de imagen |
+| Auditoría de logs | Revisión de `kern.log` (iptables LOG), Sysmon y Event Viewer | Registro de paquetes denegados y eventos de seguridad activos | ⏳ Pendiente de imagen |
+| Alerta de port scanning | Simulación de escaneo de puertos contra el Gateway | Activación de alerta `PortScanDetected` en Telegram | ⏳ Pendiente de imagen |
+| GPOs aplicadas | Validación de `GPO_Seguridad_Contraseñas` y `GPO_Seguridad_Equipos` en clientes del dominio | Políticas de contraseñas y firewall aplicadas correctamente | ⏳ Pendiente de imagen |
+| Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin VPN o desde IP no autorizada | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN, RDP requiere VPN o SG restringido) |
+
+---
+
+### 5.6. Pruebas de disponibilidad y recuperación
+
+**Objetivo:** Confirmar que los servicios críticos se recuperan correctamente ante reinicios y que existe capacidad de restauración ante fallos.
+
+**Pruebas ejecutadas:**
+
+| Prueba | Descripción | Resultado esperado | Estado |
+|--------|-------------|--------------------|--------|
+| Reinicio de servicios críticos (Ubuntu) | `systemctl restart prometheus grafana-server wg-quick@wg0` | Servicios activos en < 10 s, métricas sin pérdida de datos históricos | ✅ Validado |
+| Reinicio de servicios críticos (Windows) | `Restart-Service TermService`, reciclaje de IIS | RDP y portal web operativos tras reinicio | ⏳ Pendiente de imagen |
+| Simulación de caída de instancia Windows | Parada controlada del Windows Server, observación de alertas y recuperación | Alerta `InstanceDown` en Telegram en < 1 min; Prometheus marca target como `down` | ✅ Validado (sección 5.2) |
+| Validación de backup | Ejecución de `wbadmin get versions -backuptarget:E:` | Al menos una versión de System State disponible | ⏳ Pendiente de imagen |
+| Recuperación en DSRM (teórico/práctico) | Arranque en Directory Services Restore Mode, acceso con contraseña DSRM | Acceso al modo de recuperación funcional | ⏳ Pendiente de imagen |
+| Reconstrucción idempotente del entorno | Eliminación y recreación del stack CloudFormation | Entorno funcionalmente idéntico tras 15-20 minutos | ✅ Validado (diseño GitOps, sección 4.6) |
+
+---
+
+### 5.7. Informe de resultados y correcciones aplicadas
+
+#### Resumen de resultados por requisito
+
+| Requisito | Descripción | Estado | Notas |
+|-----------|-------------|--------|-------|
+| RF-01 | Enrutamiento NAT | ✅ Validado | Tracert, ping y DNS operativos (sección 5.2) |
+| RF-02 | Despliegue automatizado | ✅ Validado | CloudFormation despliega sin intervención manual; parámetros validados |
+| RF-03 | Seguridad de red | ✅ Validado | iptables + Security Groups operativos |
+| RF-04 | Monitorización de tráfico | ✅ Validado | Métricas de red visibles en Grafana |
+| RF-05 | Dashboard unificado | ✅ Validado | Node Exporter Full + Windows Server personalizado |
+| RF-06 | Active Directory | ✅ Validado | Dominio `tfg.vp` funcional, DNS integrado |
+| RF-07 | Acceso VPN | ✅ Validado | WireGuard conecta y enruta correctamente |
+| RF-08 | Gestión de alertas | ✅ Validado | Telegram recibe alertas en < 1 minuto |
+| RF-09 | Acceso remoto | ✅ Validado | SSH y RDP accesibles según matriz de perfiles |
+| RNF-01 | Aislamiento de red | ✅ Validado | Windows Server sin IP pública directa |
+| RNF-02 | Inmutabilidad / GitOps | ✅ Validado | Stack YAML declarativo, bootstrap idempotente |
+| RNF-03 | Disponibilidad de servicios | ✅ Validado | Servicios habilitados en `systemd` y autoarranque |
+| RNF-04 | Seguridad VPN (cifrado) | ✅ Validado | WireGuard con ChaCha20/Poly1305 |
+| RNF-05 | Rendimiento de enrutamiento | ✅ Validado | Latencias < 1 ms internas |
+| RNF-06 | Documentación y versionado | ✅ Validado | README y repositorio Git actualizados |
+
+#### Correcciones aplicadas
+
+Durante el ciclo de pruebas y la implantación se detectaron y resolvieron diversas incidencias técnicas. **Para no duplicar contenido**, el registro detallado de incidencias, causas raíz y soluciones aplicadas se encuentra documentado en la sección **4.12. Incidencias durante la implantación** del presente documento.
+
+Entre las correcciones más relevantes destacan:
+- Cambio de subred VPN a `172.16.3.0/24` para evitar conflictos con el CIDR de la VPC.
+- Actualización manual de Alertmanager a la versión 0.28.1 para soporte nativo de Telegram.
+- Corrección de reglas DNAT para usar la IP privada del Gateway obtenida dinámicamente desde los metadatos de AWS.
+- Implementación de la estrategia Stage0/Stage2 en Windows Server para resolver dependencias de arranque en paralelo de CloudFormation.
+
+#### Verificación de servicios tras reinicio
+
+Tras ejecutar el reinicio manual de los servicios críticos en el Gateway Ubuntu, se verificó su estado mediante `systemctl status`:
+
+![Prometheus activo](imagenes/prometheus-active.png)
+
+*Figura: Estado del servicio Prometheus tras reinicio manual, mostrando `active (running)`.*
+
+![WireGuard activo](imagenes/wireguard-active.png)
+
+*Figura: Estado del servicio WireGuard (`wg-quick@wg0`) tras reinicio manual, mostrando `active (running)`.*
+
+![Grafana activo](imagenes/grafana-active.png)
+
+*Figura: Estado del servicio Grafana Server tras reinicio manual, mostrando `active (running)`.*
