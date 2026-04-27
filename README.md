@@ -2389,11 +2389,17 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 |--------|-------------|--------------------|--------|
 | Validación de iptables | Revisión de chains INPUT, FORWARD, POSTROUTING, PREROUTING | Reglas NAT, DNAT y LOG presentes y activas | ✅ Validado (configuración en sección 4.2) |
 | Security Groups AWS | Verificación de reglas de entrada en SG-Gateway y SG-Internal | Solo puertos autorizados abiertos (22, 3389, 51820, 9090, 9093, 9100, 9182) | ✅ Validado (sección 3.2) |
-| Escaneo de puertos | `nmap` desde Internet hacia IP Elástica del Gateway | Solo 22/TCP, 3389/TCP y 51820/UDP visibles; resto filtrados | ⏳ Pendiente de imagen |
+| Escaneo de puertos | `nmap` desde Internet hacia IP Elástica del Gateway | Solo 22/TCP, 3389/TCP y 51820/UDP visibles; resto filtrados | ✅ Validado |
 | Auditoría de logs | Revisión de `kern.log` (iptables LOG), Sysmon y Event Viewer | Registro de paquetes denegados y eventos de seguridad activos | ⏳ Pendiente de imagen |
 | Alerta de port scanning | Simulación de escaneo de puertos contra el Gateway | Activación de alerta `PortScanDetected` en Telegram | ⏳ Pendiente de imagen |
 | GPOs aplicadas | Validación de `GPO_Seguridad_Contraseñas` y `GPO_Seguridad_Equipos` en clientes del dominio | Políticas de contraseñas y firewall aplicadas correctamente | ⏳ Pendiente de imagen |
 | Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin autorización | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN; RDP expuesto a Internet por limitaciones de AWS Academy) |
+
+##### Escaneo de puertos con nmap
+
+![Escaneo de puertos nmap](imagenes/nmap.png)
+
+*Figura: Resultado del escaneo nmap desde Internet contra la IP Elástica del Gateway. Se confirma que solo el puerto 22/TCP (SSH) y 3389/TCP (RDP por DNAT) están expuestos. Los demás puertos aparecen como `filtered`, lo que indica que el Security Group de AWS los bloquea antes de llegar a la instancia.*
 
 ---
 

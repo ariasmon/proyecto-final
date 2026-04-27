@@ -629,6 +629,23 @@ try {
 }
 
 # ------------------------------------------------------------------
+# Copiar script de backup al escritorio
+# ------------------------------------------------------------------
+try {
+    $desktopPath = "C:\Users\Public\Desktop"
+    if (-not (Test-Path $desktopPath)) {
+        New-Item -Path $desktopPath -ItemType Directory -Force | Out-Null
+    }
+    $backupScript = Join-Path $RepoDir "scripts\backup-windows-server.ps1"
+    if (Test-Path $backupScript) {
+        Copy-Item -Path $backupScript -Destination $desktopPath -Force
+        Write-Log "backup-windows-server.ps1 copiado al escritorio ($desktopPath)"
+    }
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo copiar el script de backup al escritorio: $($_.Exception.Message)"
+}
+
+# ------------------------------------------------------------------
 # 16. Eliminar ScheduledTask de bootstrap y crear marcador de finalización
 # ------------------------------------------------------------------
 Write-Log "[16/16] Eliminando tareas de bootstrap..."
