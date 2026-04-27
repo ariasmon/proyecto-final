@@ -304,7 +304,7 @@ if (-not $diskReady) {
 # ------------------------------------------------------------------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     try {
-        Write-Log "[0/11] Instalando Git for Windows..."
+        Write-Log "[0/12] Instalando Git for Windows..."
         $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
         $gitInstaller = "C:\Git-installer.exe"
         Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
@@ -319,7 +319,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 
 if (-not (Test-Path $RepoDir)) {
     try {
-        Write-Log "[0/11] Clonando repositorio..."
+        Write-Log "[0/12] Clonando repositorio..."
         & git clone $GitHubRepo $RepoDir 2>&1 | ForEach-Object { Write-Log $_ }
         Write-Log "Repositorio clonado."
     } catch {
@@ -335,7 +335,7 @@ if (-not (Test-Path $RepoDir)) {
 # ------------------------------------------------------------------
 if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
     try {
-        Write-Log "[0b/11] Instalando Windows Exporter..."
+        Write-Log "[0b/12] Instalando Windows Exporter..."
         $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
         Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
         Start-Process -FilePath "msiexec.exe" -ArgumentList "/i C:\windows_exporter.msi ENABLED_COLLECTORS=`"cpu,memory,logical_disk,net,os,system`" /qn" -NoNewWindow -Wait
@@ -352,7 +352,7 @@ if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
 # ------------------------------------------------------------------
 # 1. Configurar DNS forwarders
 # ------------------------------------------------------------------
-Write-Log "[1/11] Configurando DNS forwarders..."
+Write-Log "[1/12] Configurando DNS forwarders..."
 try {
     Import-Module DnsServer -ErrorAction Stop
     $existingForwarders = Get-DnsServerForwarder -ErrorAction SilentlyContinue
@@ -369,7 +369,7 @@ try {
 # ------------------------------------------------------------------
 # 2. Cambiar DNS del adaptador
 # ------------------------------------------------------------------
-Write-Log "[2/11] Ajustando DNS del adaptador (127.0.0.1 + 8.8.8.8)..."
+Write-Log "[2/12] Ajustando DNS del adaptador (127.0.0.1 + 8.8.8.8)..."
 $adapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1
 if ($adapter) {
     Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1", "8.8.8.8")
@@ -380,7 +380,7 @@ if ($adapter) {
 # 2b. Habilitar y configurar RDP
 # ------------------------------------------------------------------
 try {
-    Write-Log "[2b/11] Habilitando RDP..."
+    Write-Log "[2b/12] Habilitando RDP..."
     Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
     Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
     Start-Service TermService -ErrorAction SilentlyContinue
@@ -394,7 +394,7 @@ try {
 # ------------------------------------------------------------------
 # 3. Crear estructura de OUs
 # ------------------------------------------------------------------
-Write-Log "[3/11] Creando estructura de OUs..."
+Write-Log "[3/12] Creando estructura de OUs..."
 $ouList = @("Usuarios", "Equipos", "Servidores", "Grupos", "Admins")
 foreach ($ou in $ouList) {
     $ouPath = "OU=$ou,DC=tfg,DC=vp"
@@ -410,7 +410,7 @@ foreach ($ou in $ouList) {
 # ------------------------------------------------------------------
 # 4. Crear grupos de seguridad
 # ------------------------------------------------------------------
-Write-Log "[4/11] Creando grupos de seguridad..."
+Write-Log "[4/12] Creando grupos de seguridad..."
 $groupsOU = "OU=Grupos,DC=tfg,DC=vp"
 $groups = @(
     @{ Name = "GG_Usuarios"; Description = "Grupo global de usuarios del dominio" },
@@ -428,10 +428,71 @@ foreach ($g in $groups) {
 }
 
 # ------------------------------------------------------------------
-# 5. Instalar Sysmon
+# 5. Políticas de contraseñas, GPO de seguridad y auditoría
+# ------------------------------------------------------------------
+Write-Log "[5/12] Configurando políticas de contraseñas, GPO y auditoría..."
+
+# 5a. Política de contraseñas del dominio
+try {
+    Write-Log "  Configurando política de contraseñas del dominio..."
+    Set-ADDefaultDomainPasswordPolicy -Identity "tfg.vp" -MinPasswordLength 8 -ComplexityEnabled $true -PasswordHistoryCount 24
+    Write-Log "  Política de contraseñas configurada (mín. 8 caracteres, complejidad, historial 24)."
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo configurar la política de contraseñas: $($_.Exception.Message)"
+}
+
+# 5b. GPO_Seguridad_Equipos (firewall habilitado + bloqueo entrantes)
+try {
+    Write-Log "  Creando GPO_Seguridad_Equipos..."
+    $gpoName = "GPO_Seguridad_Equipos"
+    $existingGpo = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
+    if (-not $existingGpo) {
+        New-GPO -Name $gpoName -Comment "Política de firewall para equipos del dominio" | Out-Null
+        Write-Log "  GPO '$gpoName' creada."
+    } else {
+        Write-Log "  GPO '$gpoName' ya existe, omitiendo creación."
+    }
+
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\DomainProfile" -ValueName "EnableFirewall" -Type DWord -Value 1 | Out-Null
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PrivateProfile" -ValueName "EnableFirewall" -Type DWord -Value 1 | Out-Null
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile" -ValueName "EnableFirewall" -Type DWord -Value 1 | Out-Null
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\DomainProfile" -ValueName "DefaultInboundAction" -Type DWord -Value 1 | Out-Null
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PrivateProfile" -ValueName "DefaultInboundAction" -Type DWord -Value 1 | Out-Null
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile" -ValueName "DefaultInboundAction" -Type DWord -Value 1 | Out-Null
+    Write-Log "  Reglas de firewall configuradas en GPO_Seguridad_Equipos."
+
+    $gpoLinked = Get-GPLink -Target "OU=Equipos,DC=tfg,DC=vp" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $gpoName }
+    if (-not $gpoLinked) {
+        New-GPLink -Name $gpoName -Target "OU=Equipos,DC=tfg,DC=vp" | Out-Null
+        Write-Log "  GPO vinculada a OU=Equipos,DC=tfg,DC=vp."
+    } else {
+        Write-Log "  GPO ya vinculada a OU=Equipos,DC=tfg,DC=vp."
+    }
+} catch {
+    Write-Log "ADVERTENCIA: No se pudo crear GPO_Seguridad_Equipos: $($_.Exception.Message)"
+}
+
+# 5c. Políticas de auditoría
+try {
+    Write-Log "  Configurando políticas de auditoría..."
+    auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+    auditpol /set /subcategory:"Logoff" /success:enable /failure:enable
+    auditpol /set /subcategory:"Account Lockout" /success:enable /failure:enable
+    auditpol /set /subcategory:"User Account Management" /success:enable /failure:enable
+    auditpol /set /subcategory:"Security Group Management" /success:enable /failure:enable
+    auditpol /set /subcategory:"Directory Service Access" /success:enable /failure:enable
+    auditpol /set /subcategory:"File Share" /success:enable /failure:enable
+    auditpol /set /subcategory:"Process Creation" /success:enable /failure:enable
+    Write-Log "  Políticas de auditoría configuradas."
+} catch {
+    Write-Log "ADVERTENCIA: No se pudieron configurar las políticas de auditoría: $($_.Exception.Message)"
+}
+
+# ------------------------------------------------------------------
+# 6. Instalar Sysmon
 # ------------------------------------------------------------------
 try {
-    Write-Log "[5/11] Instalando Sysmon..."
+    Write-Log "[6/12] Instalando Sysmon..."
     $sysmonZip = "C:\Sysmon.zip"
     $sysmonDir = "C:\Sysmon"
     $configPath = "$sysmonDir\sysmonconfig.xml"
@@ -479,7 +540,7 @@ try {
 # 6. Desplegar IIS: sitio MiSitio + contenido web
 # ------------------------------------------------------------------
 try {
-    Write-Log "[6/11] Configurando IIS..."
+    Write-Log "[7/12] Configurando IIS..."
     Import-Module WebAdministration -ErrorAction Stop
 
     if (-not (Test-Path $SiteDir)) {
@@ -507,7 +568,7 @@ try {
 # 7. Configurar API AD
 # ------------------------------------------------------------------
 try {
-    Write-Log "[7/11] Configurando API de altas de usuarios AD..."
+    Write-Log "[8/12] Configurando API de altas de usuarios AD..."
 
     if (-not (Test-Path $ApiDir)) {
         New-Item -Path $ApiDir -ItemType Directory -Force | Out-Null
@@ -552,7 +613,7 @@ try {
 # ------------------------------------------------------------------
 # 8. Generar ad-users.json
 # ------------------------------------------------------------------
-Write-Log "[8/11] Generando ad-users.json..."
+Write-Log "[9/12] Generando ad-users.json..."
 $exportScript = Join-Path $RepoDir "scripts\exportar-usuarios-ad.ps1"
 $adUsersJson = "$SiteDir\ad-users.json"
 try {
@@ -565,7 +626,7 @@ try {
 # ------------------------------------------------------------------
 # 9. Tarea programada para exportar usuarios (diaria a las 03:00)
 # ------------------------------------------------------------------
-Write-Log "[9/11] Creando tarea programada de exportación de usuarios..."
+Write-Log "[10/12] Creando tarea programada de exportación de usuarios..."
 $exportAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File `"$exportScript`" -OutputPath `"$adUsersJson`""
 $exportTrigger = New-ScheduledTaskTrigger -Daily -At "03:00AM"
 $exportPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -580,7 +641,7 @@ try {
 # ------------------------------------------------------------------
 # 10. Eliminar ScheduledTask de bootstrap
 # ------------------------------------------------------------------
-Write-Log "[10/11] Eliminando tareas de bootstrap..."
+Write-Log "[11/12] Eliminando tareas de bootstrap..."
 Unregister-ScheduledTask -TaskName "TFG-Bootstrap" -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName "TFG-Stage2" -Confirm:$false -ErrorAction SilentlyContinue
 Write-Log "Tareas de bootstrap eliminadas."
@@ -588,7 +649,7 @@ Write-Log "Tareas de bootstrap eliminadas."
 # ------------------------------------------------------------------
 # 11. Crear marcador de finalización
 # ------------------------------------------------------------------
-Write-Log "[11/11] Creando marcador de finalización..."
+Write-Log "[12/12] Creando marcador de finalización..."
 $bootstrapInfo = @{
     CompletedAt = (Get-Date).ToString("o")
     DomainName = $DomainName

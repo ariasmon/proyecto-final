@@ -1278,22 +1278,29 @@ Esta estructura permite una gestión de permisos escalable y facilita la adminis
 
 #### GPO implementadas
 
-Se crearon y vincularon a las OUs correspondientes las siguientes políticas de grupo:
+> **Nota de automatización:** Las GPOs de contraseñas y firewall de equipos, así como las políticas de auditoría, se configuran automáticamente durante el despliegue mediante el script `bootstrap-windows.ps1` (véase la sección 4.20, paso 5). La sección siguiente describe la configuración que se aplica de forma automática.
 
-| GPO | OU aplicada | Configuración principal |
-|-----|-------------|------------------------|
-| `GPO_Seguridad_Contraseñas` | Dominio | Longitud mínima 8-12 caracteres, complejidad habilitada, historial de contraseñas |
-| `GPO_Seguridad_Equipos` | OU Equipos | Firewall activado para Domain/Private/Public Profiles, bloqueo de conexiones entrantes no autorizadas |
+Se crean y vinculan a las OUs correspondientes las siguientes políticas de grupo:
 
-**Configuración de la GPO de contraseñas:**
+| GPO | OU aplicada | Configuración principal | Automatizada |
+|-----|-------------|------------------------|:------------:|
+| Política de contraseñas (dominio) | Dominio (`tfg.vp`) | Longitud mínima 8 caracteres, complejidad habilitada, historial de 24 contraseñas | ✅ |
+| `GPO_Seguridad_Equipos` | OU Equipos | Firewall activado para Domain/Private/Public Profiles, bloqueo de conexiones entrantes no autorizadas | ✅ |
+
+**Configuración de la política de contraseñas del dominio:**
+
+La política de contraseñas se aplica a nivel de dominio mediante `Set-ADDefaultDomainPasswordPolicy`, ya que las Account Policies solo pueden vincularse al dominio en Active Directory:
+
 - Longitud mínima: 8 caracteres
 - Complejidad: habilitada (mayúsculas, minúsculas, números, símbolos)
 - Historial: 24 contraseñas recordadas
-- Caducidad: opcional según política organizativa
 
-**Configuración de la GPO de firewall:**
-- Perfiles Domain, Private y Public: activados
-- Bloqueo de conexiones entrantes: habilitado
+**Configuración de la GPO de firewall (`GPO_Seguridad_Equipos`):**
+
+Se aplica a la OU `Equipos` mediante `New-GPO`, `Set-GPRegistryValue` y `New-GPLink`:
+
+- Perfiles Domain, Private y Public: firewall activado
+- Acción por defecto para conexiones entrantes: bloquear
 - Excepciones: puertos necesarios para AD (88/TCP Kerberos, 389/TCP LDAP, etc.)
 
 > **Nota sobre el firewall del servidor AD:** El firewall de Windows en el controlador de dominio permanece desactivado intencionadamente. La seguridad perimetral está garantizada por capas superiores:
@@ -1317,20 +1324,25 @@ Se crearon y vincularon a las OUs correspondientes las siguientes políticas de 
 
 ### 4.14. Auditoría de seguridad y Sysmon
 
+> **Nota de automatización:** Las políticas de auditoría se configuran automáticamente durante el despliegue mediante el script `bootstrap-windows.ps1` (véase la sección 4.20, paso 5c). Se utilizan comandos `auditpol` directamente en el controlador de dominio, lo cual es funcionalmente equivalente a configurarlas vía GPO en un entorno de un solo DC.
+
 Con el objetivo de reforzar la trazabilidad del Windows Server, se habilitaron políticas de auditoría del sistema y se instaló **Sysmon** como herramienta complementaria de monitorización de eventos avanzados.
 
-#### Políticas de auditoría activadas
+#### Políticas de auditoría habilitadas
 
-Se habilitaron las siguientes directivas de auditoría mediante **GPO del dominio**:
+Se habilitaron las siguientes directivas de auditoría mediante `auditpol`:
 
-- Audit logon events
-- Audit account logon events
-- Audit account management
-- Audit policy change
-- Audit object access
-- Audit process tracking
+- Audit Logon
+- Audit Logoff
+- Audit Logoff
+- Audit Account Lockout
+- Audit User Account Management
+- Audit Security Group Management
+- Audit Directory Service Access
+- Audit File Share
+- Audit Process Creation
 
-Además, se configuraron las siguientes categorías de auditoría avanzada dentro de la GPO, en **Computer Configuration > Windows Settings > Security Settings > Advanced Audit Policy Configuration**:
+Adicionalmente, se configuraron las siguientes categorías de auditoría avanzada dentro de la GPO, en **Computer Configuration > Windows Settings > Security Settings > Advanced Audit Policy Configuration**:
 
 - Logon/Logoff
 - Account Logon
@@ -1339,16 +1351,19 @@ Además, se configuraron las siguientes categorías de auditoría avanzada dentr
 - Policy Change
 - Detailed Tracking
 
+Las subcategorías habilitadas por `auditpol` cubren las mismas funcionalidades que se listarían manualmente en una GPO de Advanced Audit Policy. En un entorno productivo con múltiples equipos, estas políticas se aplicarían vía GPO vinculada al dominio.
+
 También se habilitaron de forma específica los siguientes eventos avanzados:
 
-- Audit Logon
-- Audit Logoff
-- Audit Account Lockout
-- Audit User Account Management
-- Audit Security Group Management
-- Audit Directory Service Access
-- Audit File Share
-- Audit Process Creation
+- Audit Logon / Logoff (ya cubierto por `auditpol`)
+- Audit Account Lockout (ya cubierto por `auditpol`)
+- Audit User Account Management (ya cubierto por `auditpol`)
+- Audit Security Group Management (ya cubierto por `auditpol`)
+- Audit Directory Service Access (ya cubierto por `auditpol`)
+- Audit File Share (ya cubierto por `auditpol`)
+- Audit Process Creation (ya cubierto por `auditpol`)
+
+> **Nota sobre la metodología:** En un entorno de un solo DC como este TFG, la configuración directa mediante `auditpol` en el servidor es equivalente a una GPO de Advanced Audit Policy. En un entorno productivo con múltiples equipos, estas políticas se aplicarían mediante GPOs vinculadas al dominio para garantizar su aplicación centralizada y replicada.
 
 #### Instalación de Sysmon
 
@@ -1976,13 +1991,14 @@ Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Stage2`
 | 2b | Habilitar RDP | Verificar `fDenyTSConnections=0`, servicio TermService y regla firewall 3389/TCP |
 | 3 | Estructura de OUs | `Usuarios`, `Equipos`, `Servidores`, `Grupos`, `Admins` bajo `DC=tfg,DC=vp` |
 | 4 | Grupos de seguridad | `GG_Usuarios`, `GG_Admins`, `GG_Portal-AD-Admins` en `OU=Grupos,DC=tfg,DC=vp` |
-| 5 | Instalar Sysmon | Con `sysmonconfig.xml` del repositorio clonado |
-| 6 | IIS: sitio MiSitio | Crear sitio, copiar `Pagina IIS/*` a `C:\inetpub\wwwroot\misitio\`, eliminar Default Web Site |
-| 7 | API `/api` | Directorio `api\` con `ad-user-service.ps1`, `create-user.ps1` y `web.config`; webapp en IIS; Win Auth habilitada, Anonymous deshabilitada; permisos `IIS_IUSRS`/`IUSR` en directorio de logs |
-| 8 | `ad-users.json` | Primera exportación de usuarios AD al directorio web |
-| 9 | Tarea exportación usuarios | Cada hora, ejecuta `exportar-usuarios-ad.ps1` para mantener `ad-users.json` actualizado |
-| 10 | Eliminar ScheduledTask | `TFG-Bootstrap` ya no necesaria |
-| 11 | Marcador de finalización | `C:\tfg-bootstrap-done` → el script no hace nada si se ejecuta de nuevo |
+| 5 | Políticas de contraseñas, GPO y auditoría | `Set-ADDefaultDomainPasswordPolicy` (longitud mín. 8, complejidad, historial 24), `New-GPO` + `Set-GPRegistryValue` para `GPO_Seguridad_Equipos` (firewall habilitado, inbound bloqueado) vinculada a `OU=Equipos`, y `auditpol` para políticas de auditoría (Logon, Logoff, Account Lockout, User Account Management, Security Group Management, Directory Service Access, File Share, Process Creation) |
+| 6 | Instalar Sysmon | Con `sysmonconfig.xml` del repositorio clonado |
+| 7 | IIS: sitio MiSitio | Crear sitio, copiar `Pagina IIS/*` a `C:\inetpub\wwwroot\misitio\`, eliminar Default Web Site |
+| 8 | API `/api` | Directorio `api\` con `ad-user-service.ps1`, `create-user.ps1` y `web.config`; webapp en IIS; Win Auth habilitada, Anonymous deshabilitada; permisos `IIS_IUSRS`/`IUSR` en directorio de logs |
+| 9 | `ad-users.json` | Primera exportación de usuarios AD al directorio web |
+| 10 | Tarea exportación usuarios | Diariamente a las 03:00, ejecuta `exportar-usuarios-ad.ps1` para mantener `ad-users.json` actualizado |
+| 11 | Eliminar ScheduledTask | `TFG-Bootstrap` ya no necesaria |
+| 12 | Marcador de finalización | `C:\tfg-bootstrap-done` → el script no hace nada si se ejecuta de nuevo |
 
 #### Mecanismo de idempotencia
 
@@ -2027,12 +2043,13 @@ El script es seguro ejecutarlo múltiples veces:
 | DNS forwarders | ✅ | |
 | Estructura de OUs | ✅ | |
 | Grupos de seguridad (GG_) | ✅ | |
+| Política de contraseñas del dominio | ✅ | |
+| GPO_Seguridad_Equipos (firewall) | ✅ | |
+| Políticas de auditoría (auditpol) | ✅ | |
 | Sysmon | ✅ | |
 | IIS + sitio MiSitio | ✅ | |
 | API /api + autenticación Windows | ✅ | |
 | ad-users.json + tarea exportación | ✅ | |
-| GPOs (contraseñas, firewall equipos) | | ✅ |
-| Políticas de auditoría avanzada | | ✅ |
 
 ### 4.19. Verificación y pruebas de conectividad
 
