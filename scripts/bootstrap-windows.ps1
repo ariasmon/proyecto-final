@@ -174,9 +174,9 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
         Write-Log "ADVERTENCIA: No se pudo clonar el repositorio: $($_.Exception.Message)"
     }
 
-    # ------------------------------------------------------------------
-    # 7. Crear ScheduledTask para post-reboot
-    # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# 6. Crear ScheduledTask para post-reboot
+# ------------------------------------------------------------------
     try {
         Write-Log "[6/8] Registrando tarea TFG-Bootstrap para post-reinicio..."
         $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\bootstrap-windows.ps1"
@@ -190,9 +190,9 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
         exit 1
     }
 
-    # ------------------------------------------------------------------
-    # 8. Habilitar RDP antes de promoción a DC
-    # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# 7. Habilitar RDP antes de promoción a DC
+# ------------------------------------------------------------------
     try {
         Write-Log "[7/8] Habilitando RDP antes de promoción a DC..."
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
@@ -206,9 +206,9 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
         Write-Log "ADVERTENCIA: No se pudo habilitar RDP: $($_.Exception.Message)"
     }
 
-    # ------------------------------------------------------------------
-    # 9. Promocionar a Domain Controller
-    # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# 8. Promocionar a Domain Controller
+# ------------------------------------------------------------------
     Write-Log "[8/8] Promocionando a Domain Controller ($DomainName)..."
     Import-Module ADDSDeployment
 
@@ -229,13 +229,13 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
 Import-Module ServerManager -ErrorAction SilentlyContinue
 
 Write-Log "=============================================="
-Write-Log "[ESTADO 1] Segundo arranque - configurando AD, IIS, API..."
+Write-Log "[ESTADO 1] Segundo arranque - configurando AD, IIS, API... (16 pasos)"
 Write-Log "Modulo ServerManager importado"
 
 # ------------------------------------------------------------------
-# 0. Detectar e inicializar disco de backup (si existe y no está configurado)
+# 1. Detectar e inicializar disco de backup (si existe y no está configurado)
 # ------------------------------------------------------------------
-Write-Log "[0/12] Buscando disco de backup..."
+Write-Log "[1/16] Buscando disco de backup..."
 Write-Log "Enumerando todos los discos del sistema..."
 $allDisks = Get-Disk
 Write-Log "Total de discos detectados: $($allDisks.Count)"
@@ -290,11 +290,11 @@ if (-not $diskReady) {
 }
 
 # ------------------------------------------------------------------
-# 0b. Instalar Git y clonar repositorio (si no existen)
+# 2. Instalar Git y clonar repositorio (si no existen)
 # ------------------------------------------------------------------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     try {
-        Write-Log "[0/12] Instalando Git for Windows..."
+        Write-Log "[2/16] Instalando Git for Windows..."
         $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
         $gitInstaller = "C:\Git-installer.exe"
         Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
@@ -309,7 +309,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 
 if (-not (Test-Path $RepoDir)) {
     try {
-        Write-Log "[0/12] Clonando repositorio..."
+        Write-Log "[3/16] Clonando repositorio..."
         & git clone $GitHubRepo $RepoDir 2>&1 | ForEach-Object { Write-Log $_ }
         Write-Log "Repositorio clonado."
     } catch {
@@ -321,11 +321,11 @@ if (-not (Test-Path $RepoDir)) {
 }
 
 # ------------------------------------------------------------------
-# 0b. Instalar Windows Exporter (si no está instalado)
+# 4. Instalar Windows Exporter (si no está instalado)
 # ------------------------------------------------------------------
 if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
     try {
-        Write-Log "[0b/12] Instalando Windows Exporter..."
+        Write-Log "[4/16] Instalando Windows Exporter..."
         $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
         Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
         Start-Process -FilePath "msiexec.exe" -ArgumentList "/i C:\windows_exporter.msi ENABLED_COLLECTORS=`"cpu,memory,logical_disk,net,os,system`" /qn" -NoNewWindow -Wait
@@ -340,9 +340,9 @@ if (-not (Get-Service -Name windows_exporter -ErrorAction SilentlyContinue)) {
 }
 
 # ------------------------------------------------------------------
-# 1. Configurar DNS forwarders
+# 5. Configurar DNS forwarders
 # ------------------------------------------------------------------
-Write-Log "[1/12] Configurando DNS forwarders..."
+Write-Log "[5/16] Configurando DNS forwarders..."
 try {
     Import-Module DnsServer -ErrorAction Stop
     $existingForwarders = Get-DnsServerForwarder -ErrorAction SilentlyContinue
@@ -357,9 +357,9 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 2. Cambiar DNS del adaptador
+# 6. Cambiar DNS del adaptador
 # ------------------------------------------------------------------
-Write-Log "[2/12] Ajustando DNS del adaptador (127.0.0.1 + 8.8.8.8)..."
+Write-Log "[6/16] Ajustando DNS del adaptador (127.0.0.1 + 8.8.8.8)..."
 $adapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1
 if ($adapter) {
     Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("127.0.0.1", "8.8.8.8")
@@ -367,10 +367,10 @@ if ($adapter) {
 }
 
 # ------------------------------------------------------------------
-# 2b. Habilitar y configurar RDP
+# 7. Habilitar y configurar RDP
 # ------------------------------------------------------------------
 try {
-    Write-Log "[2b/12] Habilitando RDP..."
+    Write-Log "[7/16] Habilitando RDP..."
     Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
     Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
     Start-Service TermService -ErrorAction SilentlyContinue
@@ -382,9 +382,9 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 3. Crear estructura de OUs
+# 8. Crear estructura de OUs
 # ------------------------------------------------------------------
-Write-Log "[3/12] Creando estructura de OUs..."
+Write-Log "[8/16] Creando estructura de OUs..."
 $ouList = @("Usuarios", "Equipos", "Servidores", "Grupos", "Admins")
 foreach ($ou in $ouList) {
     $ouPath = "OU=$ou,DC=tfg,DC=vp"
@@ -398,9 +398,9 @@ foreach ($ou in $ouList) {
 }
 
 # ------------------------------------------------------------------
-# 4. Crear grupos de seguridad
+# 9. Crear grupos de seguridad
 # ------------------------------------------------------------------
-Write-Log "[4/12] Creando grupos de seguridad..."
+Write-Log "[9/16] Creando grupos de seguridad..."
 $groupsOU = "OU=Grupos,DC=tfg,DC=vp"
 $groups = @(
     @{ Name = "GG_Usuarios"; Description = "Grupo global de usuarios del dominio" },
@@ -418,9 +418,9 @@ foreach ($g in $groups) {
 }
 
 # ------------------------------------------------------------------
-# 5. Políticas de contraseñas, GPO de seguridad y auditoría
+# 10. Políticas de contraseñas, GPO de seguridad y auditoría
 # ------------------------------------------------------------------
-Write-Log "[5/12] Configurando políticas de contraseñas, GPO y auditoría..."
+Write-Log "[10/16] Configurando políticas de contraseñas, GPO y auditoría..."
 
 # 5a. Política de contraseñas del dominio
 try {
@@ -479,10 +479,10 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 6. Instalar Sysmon
+# 11. Instalar Sysmon
 # ------------------------------------------------------------------
 try {
-    Write-Log "[6/12] Instalando Sysmon..."
+    Write-Log "[11/16] Instalando Sysmon..."
     $sysmonZip = "C:\Sysmon.zip"
     $sysmonDir = "C:\Sysmon"
     $configPath = "$sysmonDir\sysmonconfig.xml"
@@ -527,10 +527,10 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 6. Desplegar IIS: sitio MiSitio + contenido web
+# 12. Desplegar IIS: sitio MiSitio + contenido web
 # ------------------------------------------------------------------
 try {
-    Write-Log "[7/12] Configurando IIS..."
+    Write-Log "[12/16] Configurando IIS..."
     Import-Module WebAdministration -ErrorAction Stop
 
     if (-not (Test-Path $SiteDir)) {
@@ -555,10 +555,10 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 7. Configurar API AD
+# 13. Configurar API AD
 # ------------------------------------------------------------------
 try {
-    Write-Log "[8/12] Configurando API de altas de usuarios AD..."
+    Write-Log "[13/16] Configurando API de altas de usuarios AD..."
 
     if (-not (Test-Path $ApiDir)) {
         New-Item -Path $ApiDir -ItemType Directory -Force | Out-Null
@@ -601,9 +601,9 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 8. Generar ad-users.json
+# 14. Generar ad-users.json
 # ------------------------------------------------------------------
-Write-Log "[9/12] Generando ad-users.json..."
+Write-Log "[14/16] Generando ad-users.json..."
 $exportScript = Join-Path $RepoDir "scripts\exportar-usuarios-ad.ps1"
 $adUsersJson = "$SiteDir\ad-users.json"
 try {
@@ -614,9 +614,9 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 9. Tarea programada para exportar usuarios (diaria a las 03:00)
+# 15. Tarea programada para exportar usuarios (diaria a las 03:00)
 # ------------------------------------------------------------------
-Write-Log "[10/12] Creando tarea programada de exportación de usuarios..."
+Write-Log "[15/16] Creando tarea programada de exportación de usuarios..."
 $exportAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File `"$exportScript`" -OutputPath `"$adUsersJson`""
 $exportTrigger = New-ScheduledTaskTrigger -Daily -At "03:00AM"
 $exportPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -629,17 +629,14 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 10. Eliminar ScheduledTask de bootstrap
+# 16. Eliminar ScheduledTask de bootstrap y crear marcador de finalización
 # ------------------------------------------------------------------
-Write-Log "[11/12] Eliminando tareas de bootstrap..."
+Write-Log "[16/16] Eliminando tareas de bootstrap..."
 Unregister-ScheduledTask -TaskName "TFG-Bootstrap" -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName "TFG-Stage2" -Confirm:$false -ErrorAction SilentlyContinue
 Write-Log "Tareas de bootstrap eliminadas."
 
-# ------------------------------------------------------------------
-# 11. Crear marcador de finalización
-# ------------------------------------------------------------------
-Write-Log "[12/12] Creando marcador de finalización..."
+Write-Log "Creando marcador de finalización..."
 $bootstrapInfo = @{
     CompletedAt = (Get-Date).ToString("o")
     DomainName = $DomainName

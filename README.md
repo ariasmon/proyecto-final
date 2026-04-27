@@ -2375,9 +2375,6 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 
 | Prueba | Descripción | Criterio de aceptación | Estado |
 |--------|-------------|------------------------|--------|
-| Estrés del Gateway Ubuntu | NAT simultáneo para subred privada + túnel VPN activo con tráfico de cliente | Latencia interna < 5 ms, sin pérdida de paquetes | ⏳ Pendiente de imagen |
-| Consumo de recursos Windows | Monitorización de CPU y memoria del DC bajo carga de autenticación | CPU < 90 %, memoria disponible > 10 % | ⏳ Pendiente de imagen |
-| Throughput WireGuard | Transferencia de archivos entre cliente VPN y subred privada | Velocidad estable sin caídas de túnel | ⏳ Pendiente de imagen |
 | Latencia de enrutamiento interno | `ping` sostenido entre Gateway (`10.0.2.1`) y Windows Server (`10.0.2.75`) | Latencia < 1 ms, 0 % packet loss | ✅ Validado (sección 5.2) |
 
 ---
