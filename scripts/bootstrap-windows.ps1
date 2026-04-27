@@ -55,7 +55,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 1. Instalar Git for Windows
     # ------------------------------------------------------------------
     try {
-        Write-Log "[1/9] Instalando Git for Windows..."
+        Write-Log "[1/8] Instalando Git for Windows..."
         $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
         $gitInstaller = "C:\Git-installer.exe"
         Invoke-WebRequest -Uri $gitUrl -OutFile $gitInstaller -UseBasicParsing
@@ -71,7 +71,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 2. Instalar características (features)
     # ------------------------------------------------------------------
     try {
-        Write-Log "[2/9] Instalando roles y características..."
+        Write-Log "[2/8] Instalando roles y características..."
         Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
         Install-WindowsFeature -Name Web-WebServer, Web-Windows-Auth, Web-CGI -IncludeManagementTools | Out-Null
         Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools | Out-Null
@@ -85,7 +85,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 3. Instalar Windows Exporter
     # ------------------------------------------------------------------
     try {
-        Write-Log "[3/9] Instalando Windows Exporter..."
+        Write-Log "[3/8] Instalando Windows Exporter..."
         $exporterUrl = "https://github.com/prometheus-community/windows_exporter/releases/download/v0.27.2/windows_exporter-0.27.2-amd64.msi"
         Invoke-WebRequest -Uri $exporterUrl -OutFile "C:\windows_exporter.msi" -UseBasicParsing
         Start-Process -FilePath "msiexec.exe" -ArgumentList "/i C:\windows_exporter.msi ENABLED_COLLECTORS=`"cpu,memory,logical_disk,net,os,system`" /qn" -NoNewWindow -Wait
@@ -99,7 +99,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 4. Esperar y montar disco de backup
     # ------------------------------------------------------------------
-    Write-Log "[4/9] Buscando disco de backup (máx 5 min)..."
+    Write-Log "[4/8] Buscando disco de backup (máx 5 min)..."
     Write-Log "Enumerando todos los discos del sistema..."
     $allDisks = Get-Disk
     Write-Log "Total de discos detectados: $($allDisks.Count)"
@@ -159,20 +159,10 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     }
 
     # ------------------------------------------------------------------
-    # 5. Tarea programada de backup semanal
-    # ------------------------------------------------------------------
-    if ($diskReady) {
-        Write-Log "[5/9] Creando tarea de backup semanal..."
-        schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM 2>$null | Out-Null
-    } else {
-        Write-Log "[5/9] Omitiendo tarea de backup (disco no disponible)"
-    }
-
-    # ------------------------------------------------------------------
-    # 6. Clonar repositorio
+    # 5. Clonar repositorio
     # ------------------------------------------------------------------
     try {
-        Write-Log "[6/9] Clonando repositorio..."
+        Write-Log "[5/8] Clonando repositorio..."
         if (Test-Path $RepoDir) {
             Write-Log "Repositorio ya existe, actualizando..."
             & git -C $RepoDir pull origin main 2>&1 | ForEach-Object { Write-Log $_ }
@@ -188,7 +178,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 7. Crear ScheduledTask para post-reboot
     # ------------------------------------------------------------------
     try {
-        Write-Log "[7/9] Registrando tarea TFG-Bootstrap para post-reinicio..."
+        Write-Log "[6/8] Registrando tarea TFG-Bootstrap para post-reinicio..."
         $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\bootstrap-windows.ps1"
         $trigger = New-ScheduledTaskTrigger -AtStartup
         $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -204,7 +194,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # 8. Habilitar RDP antes de promoción a DC
     # ------------------------------------------------------------------
     try {
-        Write-Log "[8/9] Habilitando RDP antes de promoción a DC..."
+        Write-Log "[7/8] Habilitando RDP antes de promoción a DC..."
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         Start-Service TermService -ErrorAction SilentlyContinue
@@ -219,7 +209,7 @@ if (-not (Get-WindowsFeature AD-Domain-Services).Installed) {
     # ------------------------------------------------------------------
     # 9. Promocionar a Domain Controller
     # ------------------------------------------------------------------
-    Write-Log "[9/9] Promocionando a Domain Controller ($DomainName)..."
+    Write-Log "[8/8] Promocionando a Domain Controller ($DomainName)..."
     Import-Module ADDSDeployment
 
     Install-ADDSForest `

@@ -1738,13 +1738,13 @@ El script realiza las siguientes acciones:
 
 ### 4.18. Estrategias de copia de seguridad
 
-Se han configurado dos estrategias de copia de seguridad para el controlador de dominio Windows Server: un backup automatizado del estado del sistema mediante `wbadmin` (gestionado por `bootstrap-windows.ps1`) y un script avanzado de backup (`backup-windows-server.ps1`) con soporte para modos interactivo, JSON y DryRun.
+Se han configurado dos estrategias de copia de seguridad para el controlador de dominio Windows Server: un volumen EBS dedicado para copias de seguridad, y un script avanzado de backup (`backup-windows-server.ps1`) con soporte para modos interactivo, JSON y DryRun.
 
 #### 4.18.1 Backup de estado del sistema con wbadmin
 
 Se ha configurado una estrategia de copia de seguridad para el controlador de dominio Windows Server mediante un volumen EBS adicional, Windows Server Backup y `wbadmin` para proteger el estado del sistema de Active Directory.
 
-> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup"), la instalación de Windows Server Backup y la tarea programada semanal se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.19). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
+> **Nota de despliegue automático:** El volumen EBS de backup, la inicialización automática de la unidad (detecta estado RAW, Offline u Online sin letra, ejecuta `Initialize-Disk -PartitionStyle MBR`, crea partición con letra E: y formatea como NTFS "Backup") y la instalación de Windows Server Backup se configuran automáticamente mediante el script `bootstrap-windows.ps1` en ESTADO 1 (véase la sección 4.19). Los pasos manuales de esta sección son necesarios únicamente si el volumen no se creó automáticamente o si se desea reconfigurar manualmente.
 
 #### Prerrequisito: volumen de backup
 
@@ -1832,34 +1832,6 @@ wbadmin start backup -allcritical -backuptarget:E: -quiet
 
 Este tipo de copia es más amplia que el estado del sistema, porque incluye los volúmenes críticos del servidor.
 
-#### Automatización con Task Scheduler
-
-La tarea programada se crea automáticamente en el despliegue de CloudFormation. Los parámetros son:
-
-- Nombre: `Backup-AD-Semanal`
-- Frecuencia: semanal
-- Día: domingo
-- Hora: 03:00
-- Usuario: `SYSTEM`
-- Acción: ejecutar `wbadmin start systemstatebackup -backuptarget:E: -quiet`
-
-Para crearla manualmente:
-
-```cmd
-schtasks /create /tn "Backup-AD-Semanal" /tr "wbadmin start systemstatebackup -backuptarget:E: -quiet" /sc weekly /d SUN /st 03:00 /ru SYSTEM
-```
-
-![Tarea programada de backup semanal](imagenes/CreaccionSemanalbackup.png)
-*Figura 8: Tarea `Backup-AD-Semanal` configurada en el Programador de tareas.*
-
-O alternativamente desde la interfaz gráfica del **Task Scheduler**:
-
-1. Abrir **Task Scheduler**.
-2. Crear una tarea nueva.
-3. Definir un desencadenador semanal, domingo a las 03:00.
-4. Configurar la acción para ejecutar `wbadmin`.
-5. Indicar que la tarea se ejecute como `SYSTEM`.
-
 #### Restauración
 
 En caso de fallo, la restauración debe hacerse desde **Directory Services Restore Mode (DSRM)**.
@@ -1887,7 +1859,7 @@ Sustituir `<VERSION_ID>` por la versión exacta obtenida en el paso anterior (fo
 
 #### 4.18.2 Script de backup avanzado (backup-windows-server.ps1)
 
-Además del backup automatizado del estado del sistema, se ha desarrollado un script de backup flexible e interactivo para Windows Server. Este script permite realizar copias de carpetas (mediante Robocopy), backups del estado del sistema (con `wbadmin`) y backups completos de disco, con soporte para ejecución interactiva, configuración por JSON y modo simulación (DryRun).
+Además del volumen de backup y las herramientas de copia de seguridad, se ha desarrollado un script de backup flexible e interactivo para Windows Server. Este script permite realizar copias de carpetas (mediante Robocopy), backups del estado del sistema (con `wbadmin`) y backups completos de disco, con soporte para ejecución interactiva, configuración por JSON y modo simulación (DryRun).
 
 ##### Archivos
 
@@ -2005,6 +1977,8 @@ powershell -ExecutionPolicy Bypass -File backup-windows-server.ps1 -ConfigPath C
 - Si se usa copia completa, preferir `allCritical` cuando el objetivo sea recuperación del sistema.
 - Verificar periódicamente logs y espacio libre del destino.
 
+Se ha construido una solución de backup flexible y guiada, pensada para la administración real de Windows Server. El script `backup-windows-server.ps1` complementa el volumen EBS dedicado y las herramientas de copia de seguridad (sección 4.18.1) con soporte para backup de carpetas mediante Robocopy, backup completo de disco mediante `wbadmin`, ejecución interactiva o por configuración JSON, y la creación de tareas programadas para su ejecución automática. Los archivos del script están disponibles en `scripts/backup-windows-server.ps1` y `scripts/backup-config.json` del repositorio, y se despliegan en `C:\tfg-despliegue\scripts\` durante el bootstrap del Windows Server.
+
 ### 4.19. Automatización completa del despliegue
 
 El despliegue de ambos servidores (Gateway Ubuntu y Windows Server) se realiza de forma automática mediante scripts idempotentes ejecutados desde el UserData de CloudFormation, sin intervención manual. Esto cumple con el requisito RF-02 (Despliegue Automatizado) y el principio GitOps (RNF-02) definidos en la sección 2.
@@ -2052,8 +2026,8 @@ CloudFormation
                           │    └─ Promocionar a DC → REBOOT
                           │
                           └── [ESTADO 1] AD DS instalado (tras reboot)
-                               ├─ Detectar e inicializar disco de backup (RAW → MBR)
-                               ├─ Montar disco backup + tarea semanal
+├─ Detectar e inicializar disco de backup (RAW → MBR)
+                                ├─ Montar disco backup
                                ├─ DNS forwarders + ajuste DNS adaptador
                                ├─ Habilitar RDP
                                ├─ Crear OUs y grupos de seguridad
@@ -2157,11 +2131,10 @@ El script detecta que el rol AD DS no está instalado y ejecuta las acciones de 
 | 2 | Instalar roles y features | AD DS + IIS (Web-WebServer, Web-Windows-Auth, Web-CGI) + Windows Server Backup |
 | 3 | Instalar Windows Exporter | MSI con collectors optimizados + regla firewall puerto 9182 |
 | 4 | Montar disco de backup | Bucle de espera (máx 5 min) para detectar el volumen EBS, luego `Initialize-Disk` + `Format-Volume E:` |
-| 5 | Tarea backup semanal | `Backup-AD-Semanal`: domingo 03:00, `wbadmin systemstatebackup` |
-| 6 | Clonar repositorio | `C:\tfg-despliegue` desde GitHub |
-| 7 | Registrar ScheduledTask | `TFG-Bootstrap` con trigger `AtStartup` para continuar tras el reboot |
-| 8 | Habilitar RDP | Configurar `fDenyTSConnections=0`, `UserAuthentication=1`, servicio TermService, regla firewall 3389/TCP |
-| 9 | Promocionar a DC | `Install-ADDSForest` con dominio `tfg.vp` → reboot automático |
+| 5 | Clonar repositorio | `C:\tfg-despliegue` desde GitHub |
+| 6 | Registrar ScheduledTask | `TFG-Bootstrap` con trigger `AtStartup` para continuar tras el reboot |
+| 7 | Habilitar RDP | Configurar `fDenyTSConnections=0`, `UserAuthentication=1`, servicio TermService, regla firewall 3389/TCP |
+| 8 | Promocionar a DC | `Install-ADDSForest` con dominio `tfg.vp` → reboot automático |
 
 #### Fase 2: Bootstrap Windows Server — Estado 1 (AD DS instalado, tras reboot)
 
@@ -2202,6 +2175,8 @@ El script es seguro ejecutarlo múltiples veces:
 | `ad-user-service.ps1` | `scripts/` | `C:\inetpub\wwwroot\misitio\api\` | Lógica de validación y creación de usuarios AD |
 | `create-user.ps1` | `scripts/` | `C:\inetpub\wwwroot\misitio\api\` | Endpoint POST de alta de usuario |
 | `exportar-usuarios-ad.ps1` | `scripts/` | `C:\tfg-despliegue\scripts\` | Exportación de usuarios AD a JSON |
+| `backup-windows-server.ps1` | `scripts/` | `C:\tfg-despliegue\scripts\` | Script de backup flexible (Robocopy, wbadmin, disco completo) |
+| `backup-config.json` | `scripts/` | `C:\tfg-despliegue\scripts\` | Configuración por defecto para ejecución no interactiva del backup |
 | `sysmonconfig.xml` | `configs/` | `C:\Sysmon\` | Configuración de Sysmon |
 
 #### Configuración automática vs manual
@@ -2222,7 +2197,7 @@ El script es seguro ejecutarlo múltiples veces:
 | Firewall desactivado | ✅ | |
 | RDP (habilitación) | ✅ | |
 | Windows Exporter | ✅ | |
-| Volumen backup + tarea semanal | ✅ | |
+| Volumen backup | ✅ | |
 | Active Directory (promoción a DC) | ✅ | |
 | DNS forwarders | ✅ | |
 | Estructura de OUs | ✅ | |
