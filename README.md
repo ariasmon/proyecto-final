@@ -22,7 +22,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **Servidor Interno (Windows Server):** Aislamiento de red (sin IP pública directa) y configuración de servicios internos (Active Directory).
 * **Active Directory:** Despliegue de dominio Windows para gestión centralizada de identidades.
 * **VPN (WireGuard):** Configuración de túnel VPN para acceso remoto seguro de usuarios al dominio.
-* **Gestión y Acceso:** Acceso remoto seguro mediante SSH y RDP (vía VPN WireGuard y DNAT desde Internet).
+* **Gestión y Acceso:** Acceso remoto mediante SSH y RDP (DNAT desde Internet).
 * **Interconexión y Visibilidad:** Configuración de tablas de rutas para forzar el tráfico a través del Gateway.
 
 ### 1.3. Recursos identificados
@@ -38,7 +38,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 ### 1.4. Restricciones y condicionantes
 
 * **Económicas:** Viabilidad dentro de la capa gratuita (Free Tier) de AWS siempre que sea posible.
-* **Seguridad:** Administración a través de puertos estándar (22 y 51820) protegidos por Security Groups. RDP accesible tanto por VPN como mediante DNAT desde Internet.
+* **Seguridad:** Administración a través de puertos estándar (22 y 51820) protegidos por Security Groups. RDP accesible mediante DNAT desde Internet.
 * **Plazos:** Despliegue funcional antes de la fecha de defensa del TFG.
 
 ### 1.5. Cronograma preliminar
@@ -49,7 +49,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 | Fase 2 | Diseño | 3 - 4 | Diagramas de red VPC y políticas de seguridad. |
 | Fase 3 | Despliegue Infra | 5 - 6 | Creación de VPC, subredes y automatización IaC. |
 | Fase 4 | Configuración | 7 - 8 | Configuración de NAT, Firewall y Monitorización. |
-| Fase 5 | Accesos | 9 | Habilitación de SSH y acceso RDP vía VPN. |
+| Fase 5 | Accesos | 9 | Habilitación de SSH y RDP mediante DNAT desde Internet. |
 | Fase 6 | Validación | 10 | Pruebas de conectividad y estrés. |
 | Fase 7 | Documentación | 11 - 12 | Redacción final de la memoria y defensa. |
 
@@ -67,7 +67,7 @@ El proyecto contempla la ejecución de las siguientes tareas clave:
 * **RF-06 (Active Directory):** Implementar dominio Windows con AD para gestión centralizada de usuarios y recursos.
 * **RF-07 (Acceso VPN):** Configurar WireGuard para permitir acceso remoto seguro de usuarios al dominio corporativo.
 * **RF-08 (Gestión de Alertas):** Notificaciones en tiempo real (Telegram) ante anomalías críticas.
-* **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP a través de VPN.
+* **RF-09 (Acceso Remoto):** Garantizar acceso administrativo vía SSH (22) y RDP mediante DNAT desde Internet.
 
 ### 2.2. Requisitos No Funcionales (RNF)
 
@@ -94,7 +94,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 | Recurso | Admin Sistemas | Admin Dominio | Usuario Corp. | Operador |
 |---------|---------------|---------------|---------------|----------|
 | SSH Gateway | ✓ | - | - | ✓ |
-| RDP Windows (vía VPN o DNAT) | ✓ | ✓ | - | - |
+| RDP Windows (DNAT desde Internet) | ✓ | ✓ | - | - |
 | VPN | ✓ | ✓ | ✓ | - |
 | Grafana (vía VPN) | ✓ | - | - | ✓ |
 | Dominio AD | ✓ | ✓ | ✓ | - |
@@ -114,7 +114,9 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 ### 3.2. Diseño de Seguridad y Accesos
 
 1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3389/TCP desde Internet (DNAT/RDP al Windows Server), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24` (incluye Grafana 3000/TCP vía VPN). Outbound: Todo permitido.
-2. **SG-Internal (Windows):** Inbound: todo el tráfico desde `172.16.3.0/24` (VPN), 3389/TCP (RDP) desde `172.16.3.0/24` y SG-Gateway, 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
+2. **SG-Internal (Windows):** Inbound: 3389/TCP (RDP) desde SG-Gateway (DNAT desde Internet), 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
+
+> **Nota sobre exposición RDP:** El acceso RDP al Windows Server se expone a Internet mediante DNAT en el puerto 3389/TCP porque el entorno de **AWS Academy** no permite el tráfico de retorno de la VPN WireGuard hacia los clientes externos, lo que imposibilita establecer una conexión VPN funcional para acceder al servidor. En un entorno productivo, el acceso RDP debería restringirse exclusivamente a la VPN.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -136,7 +138,7 @@ Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente de
 
 ##### Gateway Ubuntu
 
-El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server está disponible tanto a través de la VPN como mediante DNAT desde Internet (puerto 3389). Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
+El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server se realiza mediante DNAT desde Internet (puerto 3389), ya que el entorno de AWS Academy no permite el tráfico de retorno de la VPN WireGuard. Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
 
 **Mitigaciones adoptadas:**
 
@@ -446,13 +448,13 @@ SGGateway:
         CidrIp: 172.16.3.0/24
 ```
 
-El Security Group del Windows Server solo permite tráfico desde el Gateway y la VPN:
+El Security Group del Windows Server permite tráfico desde el Gateway (para DNAT/RDP desde Internet, métricas y DNS):
 
 ```yaml
 SGInternal:
   Type: AWS::EC2::SecurityGroup
   Properties:
-    GroupDescription: Windows Server - Acceso desde Gateway y VPN
+    GroupDescription: Windows Server - Acceso desde Gateway (DNAT/RDP, métricas, DNS)
     VpcId: !Ref VPC
     SecurityGroupIngress:
       - IpProtocol: -1
@@ -482,6 +484,8 @@ SGInternal:
         ToPort: -1
         SourceSecurityGroupId: !Ref SGGateway
 ```
+
+> **Nota:** Las reglas del SG-Internal que permiten tráfico desde `172.16.3.0/24` (subred VPN) forman parte del diseño original de la arquitectura, pero en el entorno de AWS Academy el tráfico de retorno de la VPN no está permitido, por lo que no son funcionales. El acceso RDP al Windows Server se realiza exclusivamente mediante DNAT desde Internet a través del SG-Gateway.
 
 #### Tablas de rutas
 
@@ -614,9 +618,11 @@ Para permitir el acceso remoto seguro de usuarios a la infraestructura desde fue
 | **Gateway** | Ubuntu Server actúa como servidor VPN y NAT |
 
 La configuración permite que los clientes VPN accedan a:
-- **Subred privada** (`10.0.2.0/24`): Windows Server, Active Directory y otros recursos internos
+- **Subred privada** (`10.0.2.0/24`): Active Directory y otros recursos internos
 - **Subred VPN** (`172.16.3.0/24`): Comunicación entre clientes conectados
 - **Internet**: Todo el tráfico de los clientes VPN se natetea a través del Gateway Ubuntu
+
+> **Nota:** En el entorno de AWS Academy, el tráfico de retorno de la VPN WireGuard hacia los clientes externos no está permitido, lo que impide el acceso funcional al Windows Server y otros recursos de la subred privada mediante conexión VPN. El acceso al Windows Server se realiza mediante DNAT desde Internet (puerto 3389/TCP).
 
 #### Instalación del servidor WireGuard
 
@@ -731,7 +737,9 @@ PersistentKeepalive = 25
 
 #### Integración con Active Directory
 
-Una vez conectado a la VPN, el cliente puede unirse al dominio **tfg.vp**:
+> **Nota:** La integración con Active Directory mediante conexión VPN no es funcional en el entorno de AWS Academy debido a las restricciones de tráfico de retorno. Esta sección describe la configuración diseñada para un entorno productivo.
+
+En un entorno sin las restricciones de AWS Academy, un cliente conectado a la VPN podría unirse al dominio **tfg.vp**:
 
 1. **Verificar conectividad DNS:**
    ```bash
@@ -2364,7 +2372,7 @@ Esta sección documenta la validación de cada requisito funcional mediante prue
 | **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna | ✅ Validado | Sección 5.2 |
 | **RF-07** (Acceso VPN) | Conexión WireGuard, acceso a `10.0.2.0/24` y `172.16.3.0/24` desde cliente | ✅ Validado | Ver sección 5.4 |
 | **RF-08** (Gestión de alertas) | Alerta `InstanceDown` simulada y recepción en Telegram | ✅ Validado | Sección 5.2 |
-| **RF-09** (Acceso remoto) | SSH al Gateway (puerto 22), RDP al Windows vía VPN (3389) y DNAT desde Internet | ✅ Validado | Conectividad verificada |
+| **RF-09** (Acceso remoto) | SSH al Gateway (puerto 22), RDP al Windows mediante DNAT desde Internet (3389) | ✅ Validado | Conectividad verificada |
 
 #### Validación del despliegue automatizado (RF-02)
 
@@ -2413,7 +2421,7 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 | Auditoría de logs | Revisión de `kern.log` (iptables LOG), Sysmon y Event Viewer | Registro de paquetes denegados y eventos de seguridad activos | ⏳ Pendiente de imagen |
 | Alerta de port scanning | Simulación de escaneo de puertos contra el Gateway | Activación de alerta `PortScanDetected` en Telegram | ⏳ Pendiente de imagen |
 | GPOs aplicadas | Validación de `GPO_Seguridad_Contraseñas` y `GPO_Seguridad_Equipos` en clientes del dominio | Políticas de contraseñas y firewall aplicadas correctamente | ⏳ Pendiente de imagen |
-| Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin VPN o desde IP no autorizada | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN, RDP requiere VPN o SG restringido) |
+| Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin autorización | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN; RDP expuesto a Internet por limitaciones de AWS Academy) |
 
 ---
 
@@ -2448,7 +2456,7 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 | RF-06 | Active Directory | ✅ Validado | Dominio `tfg.vp` funcional, DNS integrado |
 | RF-07 | Acceso VPN | ✅ Validado | WireGuard conecta y enruta correctamente |
 | RF-08 | Gestión de alertas | ✅ Validado | Telegram recibe alertas en < 1 minuto |
-| RF-09 | Acceso remoto | ✅ Validado | SSH y RDP accesibles según matriz de perfiles |
+| RF-09 | Acceso remoto | ✅ Validado | SSH y RDP (DNAT desde Internet) accesibles según matriz de perfiles |
 | RNF-01 | Aislamiento de red | ✅ Validado | Windows Server sin IP pública directa |
 | RNF-02 | Inmutabilidad / GitOps | ✅ Validado | Stack YAML declarativo, bootstrap idempotente |
 | RNF-03 | Disponibilidad de servicios | ✅ Validado | Servicios habilitados en `systemd` y autoarranque |
