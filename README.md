@@ -116,7 +116,7 @@ El sistema está diseñado para ser utilizado por diferentes perfiles de usuario
 1. **SG-Gateway (Ubuntu):** Inbound: 22/TCP (SSH), 3389/TCP desde Internet (DNAT/RDP al Windows Server), 9090/TCP desde VPC (Prometheus), 9093/TCP desde VPC (Alertmanager), 51820/UDP (WireGuard), todo el tráfico desde `10.0.2.0/24` y `172.16.3.0/24` (incluye Grafana 3000/TCP vía VPN). Outbound: Todo permitido.
 2. **SG-Internal (Windows):** Inbound: 3389/TCP (RDP) desde SG-Gateway (DNAT desde Internet), 9182/TCP (Windows Exporter) desde SG-Gateway, 53/TCP-UDP (DNS) desde SG-Gateway, ICMP desde SG-Gateway. Outbound: Todo permitido.
 
-> **Nota sobre exposición RDP:** El acceso RDP al Windows Server se expone a Internet mediante DNAT en el puerto 3389/TCP porque el entorno de **AWS Academy** no permite el tráfico de retorno de la VPN WireGuard hacia los clientes externos, lo que imposibilita establecer una conexión VPN funcional para acceder al servidor. En un entorno productivo, el acceso RDP debería restringirse exclusivamente a la VPN.
+> **Nota sobre exposición RDP:** El acceso RDP al Windows Server se expone a Internet mediante DNAT en el puerto 3389/TCP como alternativa de acceso administrativo, ya que RDP a través de la VPN WireGuard no resultó operativo en las pruebas realizadas, posiblemente debido a limitaciones del entorno de AWS Academy o problemas de MTU con el túnel WireGuard. La VPN permite la unión al dominio y el acceso a recursos internos, pero el protocolo RDP requiere tráfico de retorno que no funcionó de forma estable a través del túnel. En un entorno productivo de AWS, se utilizaría **AWS Systems Manager Session Manager** para acceso remoto seguro sin exponer puertos a Internet, pero este servicio no está disponible en AWS Academy.
 
 ### 3.3 Esquema de la arquitectura
 ![Diagrama de Topología de Red](imagenes/topologia.png)
@@ -138,7 +138,7 @@ Un **punto único de fallo** (Single Point of Failure, SPOF) es un componente de
 
 ##### Gateway Ubuntu
 
-El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server se realiza mediante DNAT desde Internet (puerto 3389), ya que el entorno de AWS Academy no permite el tráfico de retorno de la VPN WireGuard. Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
+El Gateway concentra múltiples funciones críticas: actúa como puerta de enlace NAT para la subred privada (sección 4.2), servidor VPN WireGuard (sección 4.7) y aloja la totalidad del stack de monitorización (secciones 4.9–4.11). El acceso RDP al Windows Server se realiza mediante DNAT desde Internet (puerto 3389), ya que RDP a través de la VPN no resultó operativo en las pruebas realizadas. Su caída supondría la pérdida de conectividad de la subred privada con Internet, la interrupción del acceso VPN remoto y la desaparición de toda capacidad de observabilidad.
 
 **Mitigaciones adoptadas:**
 
@@ -485,7 +485,7 @@ SGInternal:
         SourceSecurityGroupId: !Ref SGGateway
 ```
 
-> **Nota:** Las reglas del SG-Internal que permiten tráfico desde `172.16.3.0/24` (subred VPN) forman parte del diseño original de la arquitectura, pero en el entorno de AWS Academy el tráfico de retorno de la VPN no está permitido, por lo que no son funcionales. El acceso RDP al Windows Server se realiza exclusivamente mediante DNAT desde Internet a través del SG-Gateway.
+> **Nota:** Las reglas del SG-Internal que permiten tráfico desde `172.16.3.0/24` (subred VPN) son funcionales para el acceso a recursos internos (Active Directory, DNS, portal web). El acceso RDP al Windows Server se realiza mediante DNAT desde Internet, ya que RDP a través de la VPN no resultó operativo en las pruebas realizadas.
 
 #### Tablas de rutas
 
@@ -622,7 +622,7 @@ La configuración permite que los clientes VPN accedan a:
 - **Subred VPN** (`172.16.3.0/24`): Comunicación entre clientes conectados
 - **Internet**: Todo el tráfico de los clientes VPN se natea a través del Gateway Ubuntu
 
-> **Nota:** En el entorno de AWS Academy, el tráfico de retorno de la VPN WireGuard hacia los clientes externos no está permitido, lo que impide el acceso funcional al Windows Server y otros recursos de la subred privada mediante conexión VPN. El acceso al Windows Server se realiza mediante DNAT desde Internet (puerto 3389/TCP).
+> **Nota:** La VPN WireGuard permite la unión al dominio y el acceso a recursos internos (Active Directory, DNS, portal web) desde equipos clientes. Sin embargo, RDP a través de la VPN no resultó operativo en las pruebas realizadas, posiblemente debido a limitaciones del entorno de AWS Academy o problemas de MTU con el túnel WireGuard. Por este motivo, el acceso RDP al Windows Server se realiza mediante DNAT desde Internet (puerto 3389/TCP). En un entorno productivo de AWS, se utilizaría **AWS Systems Manager Session Manager** para administración remota segura sin exponer puertos a Internet, pero este servicio no está disponible en AWS Academy.
 
 #### Instalación del servidor WireGuard
 
@@ -737,9 +737,7 @@ PersistentKeepalive = 25
 
 #### Integración con Active Directory
 
-> **Nota:** La integración con Active Directory mediante conexión VPN no es funcional en el entorno de AWS Academy debido a las restricciones de tráfico de retorno. Esta sección describe la configuración diseñada para un entorno productivo.
-
-En un entorno sin las restricciones de AWS Academy, un cliente conectado a la VPN podría unirse al dominio **tfg.vp**:
+Un cliente conectado a la VPN puede unirse al dominio **tfg.vp** mediante los siguientes pasos:
 
 1. **Verificar conectividad DNS:**
    ```bash
@@ -755,25 +753,6 @@ En un entorno sin las restricciones de AWS Academy, un cliente conectado a la VP
    ```bash
    sudo realm join tfg.vp -U administrador
    ```
-
-#### Verificación de la conexión VPN
-
-Para verificar clientes conectados desde el servidor:
-
-```bash
-# Ver peers activos
-sudo wg show
-
-# Salida esperada:
-# interface: wg0
-#   public key: (clave_del_servidor)
-#   private key: (hidden)
-#   listening port: 51820
-#
-# peer: (clave_publica_cliente)
-#   endpoint: (IP_cliente):puerto
-#   allowed ips: 172.16.3.2/32
-```
 
 #### Consideraciones de seguridad
 
@@ -944,17 +923,6 @@ Para conectar Grafana con Prometheus:
 3. Configurar URL: `http://localhost:9090`
 4. Guardar y probar conexión
 
-#### Dashboard Recomendado
-
-Se recomienda importar el dashboard **Node Exporter Full** (ID: 1860) desde Grafana:
-
-1. **Dashboards** → **Import**
-2. Introducir ID: `1860`
-3. Seleccionar data source: Prometheus
-4. Importar
-
-Este dashboard proporciona una vista completa de las métricas del sistema Ubuntu.
-
 #### Provisioning Automático de Grafana
 
 Grafana se configura automáticamente mediante ** provisioning**, lo que permite pre-configurar datasources y dashboards sin necesidad de intervención manual a través de la interfaz web.
@@ -1017,11 +985,7 @@ chown -R grafana:grafana /var/lib/grafana/dashboards
 systemctl restart grafana-server
 ```
 
-Tras ejecutar el bootstrap, Grafana ya tiene:
-- ✅ Datasource Prometheus configurado automáticamente
-- ✅ Dashboard Node Exporter Full disponible
-- ✅ Dashboard Windows Server personalizado disponible
-- ✅ Sin necesidad de configuración manual a través de la interfaz web
+Tras ejecutar el bootstrap, Grafana ya tiene configurado automáticamente el datasource Prometheus, el dashboard Node Exporter Full y el dashboard Windows Server personalizado, sin necesidad de configuración manual a través de la interfaz web.
 
 #### Dashboard de Windows Server
 
@@ -1409,7 +1373,6 @@ Con el objetivo de reforzar la trazabilidad del Windows Server, se habilitaron p
 Se habilitaron las siguientes directivas de auditoría mediante `auditpol`:
 
 - Audit Logon
-- Audit Logoff
 - Audit Logoff
 - Audit Account Lockout
 - Audit User Account Management
@@ -2412,7 +2375,7 @@ Get-GPPermission -Name "GPO_Seguridad_Equipos" -All | Where-Object { $_.Trustee.
 | Validación de iptables | Revisión de chains INPUT, FORWARD, POSTROUTING, PREROUTING | Reglas NAT, DNAT y LOG presentes y activas | ✅ Validado (configuración en sección 4.2) |
 | Security Groups AWS | Verificación de reglas de entrada en SG-Gateway y SG-Internal | Solo puertos autorizados abiertos (22, 3389, 51820, 9090, 9093, 9100, 9182) | ✅ Validado (sección 3.2) |
 | Escaneo de puertos | `nmap` desde Internet hacia IP Elástica del Gateway | Solo 22/TCP, 3389/TCP y 51820/UDP visibles; resto filtrados | ✅ Validado |
-| Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin autorización | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN; RDP expuesto a Internet por limitaciones de AWS Academy) |
+| Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin autorización | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN; RDP expuesto a Internet como alternativa de acceso administrativo) |
 
 ##### Escaneo de puertos con nmap
 
@@ -2483,3 +2446,290 @@ Tras ejecutar el reinicio manual de los servicios críticos en el Gateway Ubuntu
 ![Grafana activo](imagenes/grafana-active.png)
 
 *Figura: Estado del servicio Grafana Server tras reinicio manual, mostrando `active (running)`.*
+
+---
+
+## 6. Documentación operativa
+
+### 6.1. Manual de usuario
+
+**Lo que el administrador le entrega al usuario:**
+
+| Elemento | Descripción |
+|----------|-------------|
+| Archivo de configuración VPN (`<nombre>.conf`) | Contiene las claves y parámetros de conexión a la red corporativa |
+| Usuario de dominio | Nombre de usuario del dominio `tfg.vp` (ej: `jgarcia`) |
+| Contraseña temporal | Contraseña inicial que deberá cambiar en el primer inicio de sesión |
+
+#### Paso 1 — Instalar WireGuard
+
+Descargar el cliente desde [https://www.wireguard.com/install/](https://www.wireguard.com/install/), instalarlo y reiniciar el equipo si es necesario.
+
+#### Paso 2 — Importar la VPN
+
+Abrir WireGuard, pulsar **Add Tunnel** → **Import from file** y seleccionar el archivo `.conf` entregado por el administrador.
+
+#### Paso 3 — Conectar la VPN
+
+Seleccionar el túnel importado y pulsar **Activate**. Una vez conectado, el equipo tiene acceso a la red corporativa.
+
+#### Paso 4 — Unirse al dominio
+
+1. Abrir **Configuración** → **Sistema** → **Acerca de** → **Unirse a un dominio**
+2. Introducir el dominio: `tfg.vp`
+3. Introducir las credenciales proporcionadas por el administrador (formato: `TFG\<usuario>`)
+4. Reiniciar el equipo
+
+#### Paso 5 — Acceder al portal interno
+
+Abrir el navegador y acceder a `http://10.0.2.75/`. La autenticación es automática con las credenciales de dominio. Si el navegador las solicita, introducir `TFG\<usuario>` y la contraseña.
+
+El portal permite:
+- Consultar el directorio de usuarios del dominio
+- Buscar por nombre o departamento
+- Exportar listados a CSV
+
+### 6.2. Manual de administración
+
+#### 6.2.1. Acceso a los servidores
+
+| Servidor | Método | Dirección | Credenciales |
+|----------|--------|-----------|--------------|
+| Gateway Ubuntu | SSH | `ubuntu@<IP_ELASTICA>` (puerto 22) | Clave `.pem` del par de claves de AWS |
+| Windows Server | RDP | `<IP_ELASTICA>:3389` (redirigido por DNAT) | `TFG\Administrator` y contraseña de DSRM |
+
+> **Nota:** El acceso RDP al Windows Server se realiza a través del Gateway Ubuntu mediante DNAT. Al conectar por RDP a la IP elástica del Gateway en el puerto 3389, el tráfico se redirige automáticamente al Windows Server (`10.0.2.75`).
+
+#### 6.2.2. Gestión de clientes VPN
+
+Para crear un nuevo cliente VPN, ejecutar en el Gateway Ubuntu:
+
+```bash
+sudo /home/ubuntu/despliegue/scripts/crear-cliente-vpn.sh <nombre_cliente>
+```
+
+El script realiza automáticamente:
+- Generación de un par de claves público/privada para el cliente
+- Asignación de una IP dentro del rango `172.16.3.x/24`
+- Registro del peer en el servidor WireGuard
+- Creación del archivo de configuración en `/etc/wireguard/clients/<nombre_cliente>.conf`
+
+El archivo `.conf` debe transferirse al equipo del usuario por un canal seguro (correo corporativo cifrado, sistema de gestión de credenciales, etc.).
+
+Para verificar los clientes conectados:
+
+```bash
+sudo wg show
+```
+
+#### 6.2.3. Gestión de usuarios del dominio
+
+Para el alta, baja y modificación de usuarios en Active Directory, consultar la sección **4.17. Portal web interno y API de gestión de usuarios AD**, donde se documentan:
+- Alta de usuarios mediante la API segura (`POST /api/create-user.ps1`)
+- Gestión manual mediante Active Directory Users and Computers (ADUC)
+- Estructura de OUs y grupos de seguridad
+
+#### 6.2.4. Copias de seguridad
+
+El sistema de backup está gestionado por el script `backup-windows-server.ps1`, que soporta tres modos de ejecución:
+
+| Modo | Descripción |
+|------|-------------|
+| Interactivo | Configuración paso a paso mediante preguntas en consola |
+| JSON | Lectura de parámetros desde `backup-config.json` |
+| DryRun | Simulación que muestra qué se haría sin ejecutar cambios |
+
+**Tipos de backup disponibles:**
+
+- **Carpetas (Robocopy):** Copia de directorios específicos con soporte de exclusión y modo espejo
+- **Estado del sistema (`wbadmin`):** Backup del System State (Active Directory, DNS, SYSVOL, registro)
+- **Disco completo:** Backup de volúmenes críticos o específicos del sistema
+
+**Restauración:**
+
+En caso de fallo crítico, la restauración debe realizarse desde el **Directory Services Restore Mode (DSRM)**:
+
+1. Reiniciar el servidor en modo DSRM (opción disponible en el menú de arranque avanzado de Windows)
+2. Iniciar sesión con la contraseña DSRM configurada durante la promoción del dominio
+3. Listar versiones de backup disponibles:
+   ```cmd
+   wbadmin get versions -backuptarget:E:
+   ```
+4. Restaurar la versión deseada:
+   ```cmd
+   wbadmin start systemstaterecovery -version:<VERSION_ID>
+   ```
+
+> **Nota:** El volumen de backup se adjunta automáticamente como unidad `E:` durante el despliegue. Si no está disponible, verificar en Disk Management que el disco esté online y con letra asignada.
+
+#### 6.2.5. Monitorización y alertas
+
+La monitorización de la infraestructura está documentada en las secciones:
+- **4.9.** Prometheus (recolección de métricas)
+- **4.10.** Grafana (visualización y dashboards)
+- **4.11.** Alertmanager (notificaciones a Telegram)
+
+**Comandos operativos básicos:**
+
+Verificar estado de los servicios en el Gateway:
+
+```bash
+systemctl status prometheus prometheus-node-exporter grafana-server prometheus-alertmanager wg-quick@wg0
+```
+
+Verificar targets activos en Prometheus:
+
+```bash
+curl http://localhost:9090/api/v1/targets | python3 -m json.tool
+```
+
+Enviar una alerta de prueba:
+
+```bash
+amtool alert add prueba severity=critical --annotation=summary="Alerta de prueba" --annotation=description="Prueba desde TFG" --alertmanager.url=http://localhost:9093
+```
+
+#### 6.2.6. Resolución de problemas frecuentes
+
+| Problema | Diagnóstico | Solución |
+|----------|-------------|---------|
+| Windows Server no responde (target `down` en Prometheus) | Verificar que el servicio `windows_exporter` está en ejecución; comprobar conectividad de red desde el Gateway (`ping 10.0.2.75`) | Reiniciar el servicio `windows_exporter`; si persiste, acceder por RDP y revisar logs |
+| Caída del Gateway Ubuntu | Alerta `InstanceDown` en Telegram; instancia no accesible por SSH | Verificar estado de la instancia en la consola de AWS; reiniciar la instancia si es necesario. Si no es recuperable, recrear el stack de CloudFormation (sección 4.6) |
+| Cliente VPN no conecta | Verificar que el puerto UDP 51820 está abierto en el Security Group del Gateway; comprobar que el peer está registrado (`sudo wg show`) | Regenerar el cliente con `crear-cliente-vpn.sh`; verificar que la IP elástica no ha cambiado |
+| Prometheus no recoge métricas | Revisar estado de targets (`curl http://localhost:9090/api/v1/targets`) | Comprobar conectividad de red entre servidores; reiniciar Prometheus (`systemctl restart prometheus`) |
+| Alertas no llegan a Telegram | Revisar bot token y chat ID en `/etc/prometheus/alertmanager.yml`; verificar estado de Alertmanager | Actualizar credenciales con los valores correctos y reiniciar Alertmanager (`systemctl restart prometheus-alertmanager`) |
+| Servicio caído tras reinicio | Ejecutar `systemctl status <servicio>` para identificar el estado | Reiniciar el servicio (`systemctl restart <servicio>`); verificar que está habilitado para el arranque (`systemctl enable <servicio>`) |
+| Portal web no carga | Verificar que IIS está en ejecución (`Get-Service W3SVC`); comprobar que el sitio `MiSitio` está iniciado | Reiniciar IIS (`iisreset`); verificar que los archivos del portal existen en `C:\inetpub\wwwroot\misitio\` |
+| Usuario no puede iniciar sesión en el dominio | Verificar que el usuario existe en ADUC; comprobar política de contraseñas; revisar eventos de seguridad en el visor de eventos | Restablecer la contraseña desde ADUC; verificar que la cuenta no está bloqueada o deshabilitada |
+
+#### 6.2.7. Procedimiento ante caída de servidores
+
+**Si cae el Gateway Ubuntu:**
+
+1. Intentar acceder por SSH. Si no responde, verificar el estado de la instancia en la consola de AWS
+2. Si la instancia está detenida, iniciarla
+3. Si no es recuperable, recrear el stack completo de CloudFormation (sección 4.6). La infraestructura es reproducible de forma idéntica
+4. Tras el arranque, verificar que los servicios están activos:
+   ```bash
+   systemctl status prometheus grafana-server prometheus-alertmanager wg-quick@wg0
+   ```
+5. Recrear los clientes VPN con `crear-cliente-vpn.sh` si la configuración de WireGuard se ha perdido
+
+**Si cae el Windows Server:**
+
+1. Intentar acceder por RDP a través del Gateway (`<IP_ELASTICA>:3389`). Si no responde, verificar el estado de la instancia en la consola de AWS
+2. Si la instancia está detenida, iniciarla
+3. Tras el arranque, verificar que los servicios críticos están en ejecución:
+   - Active Directory Domain Services (`NTDS`)
+   - DNS Server
+   - Servicio de Escritorio Remoto
+   - Windows Exporter (`windows_exporter`)
+   - IIS (`W3SVC`)
+4. Si el servidor no arranca correctamente, iniciar en **Directory Services Restore Mode (DSRM)** y restaurar el estado del sistema desde el backup más reciente (sección 6.2.4)
+5. Si no es recuperable, es necesario recrear el stack de CloudFormation y volver a promover el servidor como controlador de dominio
+
+> **Nota importante:** En ambos casos, el despliegue automatizado mediante CloudFormation permite reconstruir el entorno completo de forma idéntica en 15–20 minutos, cumpliendo con el principio de Inmutabilidad/GitOps (RNF-02).
+
+### 6.3. Políticas de seguridad y continuidad de negocio
+
+#### 6.3.1. Política de contraseñas
+
+El dominio `tfg.vp` aplica una política de contraseñas configurada mediante `Set-ADDefaultDomainPasswordPolicy` (véase la sección 4.13 para los detalles de configuración):
+
+| Parámetro | Valor |
+|-----------|-------|
+| Longitud mínima | 8 caracteres |
+| Complejidad | Habilitada (mayúsculas, minúsculas, números, símbolos) |
+| Historial | 24 contraseñas recordadas |
+| Caducidad | Según política predeterminada del dominio |
+
+La GPO `GPO_Seguridad_Equipos` aplica adicionalmente la activación del firewall de Windows en todos los perfiles para los equipos del dominio, bloqueando por defecto las conexiones entrantes no autorizadas.
+
+#### 6.3.2. Gestión de accesos
+
+El acceso a los recursos de la infraestructura está segmentado por perfil de usuario. La matriz completa de accesos se documenta en la sección 2.3. A continuación se presenta un resumen operativo:
+
+| Recurso | Admin Sistemas | Admin Dominio | Usuario Corp. |
+|---------|---------------|---------------|---------------|
+| SSH Gateway (puerto 22) | ✓ | — | — |
+| RDP Windows Server (puerto 3389) | ✓ | ✓ | — |
+| VPN WireGuard | ✓ | ✓ | ✓ |
+| Grafana (vía VPN) | ✓ | — | — |
+| Dominio AD | ✓ | ✓ | ✓ |
+| Portal web interno (vía VPN) | ✓ | ✓ | ✓ |
+
+Principios aplicados:
+- Principio de mínimo privilegio: cada perfil accede únicamente a los recursos necesarios para su función.
+- Acceso a Grafana restringido a la VPN (puerto 3000 en `172.16.3.1`).
+- Acceso RDP expuesto a Internet por limitaciones del entorno (en producción: restringido a VPN).
+- Credenciales de dominio separadas de las credenciales de infraestructura (AWS).
+
+#### 6.3.3. Endurecimiento perimetral y de red
+
+La infraestructura implementa seguridad en capas:
+
+| Capa | Mecanismo | Referencia |
+|------|-----------|------------|
+| Perímetro AWS | Security Groups: solo puertos 22/TCP, 3389/TCP, 51820/UDP expuestos a Internet | Sección 3.2 |
+| Firewall del Gateway | iptables: NAT, DNAT, FORWARD, reglas LOG para detección de port scanning | Sección 4.2 |
+| Subred privada | Windows Server sin IP pública directa, tráfico enrutado a través del Gateway | Sección 3.1 |
+| VPN | WireGuard con cifrado ChaCha20/Poly1305, subred dedicada `172.16.3.0/24` | Sección 4.7 |
+| Equipos clientes | GPO `GPO_Seguridad_Equipos`: firewall activado, inbound bloqueado por defecto | Sección 4.13 |
+| Controlador de dominio | Firewall de Windows desactivado (seguridad garantizada por Security Groups e iptables) | Sección 4.13 |
+
+#### 6.3.4. Auditoría y trazabilidad
+
+El sistema implementa auditoría en múltiples niveles:
+
+**Windows Server (Event Log + Sysmon):**
+- Políticas de auditoría configuradas mediante `auditpol`: inicio/cierre de sesión, bloqueo de cuentas, gestión de usuarios y grupos, acceso a directorio activo, recursos compartidos y creación de procesos (véase la sección 4.14).
+- Sysmon instalado con configuración personalizada (`configs/sysmonconfig.xml`) para monitorización avanzada de procesos, conexiones de red y actividad sospechosa.
+
+**Gateway Ubuntu (iptables + Prometheus):**
+- Reglas LOG de iptables en chains INPUT y FORWARD para registrar paquetes descartados (véase la sección 4.15).
+- Métricas custom de paquetes denegados expuestas a Prometheus mediante textfile collector.
+- Alerta `PortScanDetected`: notificación automática cuando el rate de paquetes denegados supera 10/segundo durante 2 minutos.
+
+**API de gestión de usuarios:**
+- Cada operación de alta de usuario registra una entrada en `ad-user-audit.log` con timestamp, actor, acción, SamAccountName y estado (véase la sección 4.17).
+
+#### 6.3.5. Continuidad de negocio
+
+**Objetivos de recuperación estimados:**
+
+| Métrica | Valor estimado | Observaciones |
+|---------|----------------|---------------|
+| RTO (Recovery Time Objective) | 20–30 minutos | Tiempo para recrear el stack completo de CloudFormation |
+| RPO (Recovery Point Objective) | 24 horas | Dependiente de la frecuencia de backup programada |
+
+**Estrategia de copias de seguridad:**
+
+| Componente | Método de backup | Destino | Frecuencia recomendada |
+|------------|-----------------|---------|------------------------|
+| Active Directory (System State) | `wbadmin` / `backup-windows-server.ps1` | Volumen EBS `E:` | Diaria |
+| Carpetas adicionales | Robocopy (vía `backup-windows-server.ps1`) | Volumen EBS `E:` | Semanal |
+| Configuración del Gateway | CloudFormation (`despliegue-tfg.yml`) + repositorio Git | Infraestructura como Código | Continua (GitOps) |
+| Configuración de WireGuard | `/etc/wireguard/` | Incluida en bootstrap automático | Continua |
+
+**Procedimiento de recuperación ante desastre:**
+
+1. **Gateway Ubuntu caído:** Recrear el stack de CloudFormation (sección 4.6). El UserData y el script `bootstrap.sh` configuran automáticamente todos los servicios sin intervención manual.
+2. **Windows Server caído:** Si el backup del System State está disponible, restaurar desde DSRM (sección 6.2.4). Si no, recrear el stack de CloudFormation, que promociona automáticamente el servidor a controlador de dominio.
+3. **Ambos servidores:** Recrear el stack completo de CloudFormation. Todo el entorno se restaura en 15–20 minutos.
+
+**Puntos únicos de fallo (SPOF):**
+
+La arquitectura cuenta con dos instancias que constituyen puntos únicos de fallo identificados y analizados en la sección 3.4. Las mitigaciones adoptadas incluyen:
+- Detección temprana mediante alertas de Prometheus (`InstanceDown`, `HighCPU`, etc.).
+- Auto-provisionamiento vía CloudFormation para recreación rápida.
+- Persistencia de configuración (iptables, reglas de firewall, scripts de bootstrap).
+
+**Mejoras recomendadas para un entorno de producción:**
+
+| Componente | Mejora | Justificación |
+|------------|--------|---------------|
+| Gateway Ubuntu | Segundo Gateway en alta disponibilidad (VRRP/keepalived o NAT Gateway gestionado de AWS) | Evitar SPOF en el perímetro de red |
+| Windows Server | Segundo controlador de dominio | Redundancia de autenticación y DNS |
+| Stack de monitorización | Servidor dedicado independiente del Gateway | Separar la carga de monitorización del enrutamiento |
+| Almacenamiento de métricas | Thanos o almacenamiento en S3 | Persistencia de métricas ante fallos del Gateway |
+| Acceso RDP | Restringir exclusivamente a VPN | Eliminar exposición directa a Internet |
