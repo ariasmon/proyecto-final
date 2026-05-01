@@ -2358,7 +2358,7 @@ Esta sección documenta la validación de cada requisito funcional mediante prue
 | **RF-03** (Seguridad de red) | Revisión de reglas iptables en Gateway y Security Groups de AWS | ✅ Validado | Ver sección 5.4 |
 | **RF-04** (Monitorización de tráfico) | Verificación de métricas `node_network_*` en Prometheus | ✅ Validado | Dashboard Grafana |
 | **RF-05** (Dashboard unificado) | Acceso a Grafana vía VPN, visualización de métricas de ambos servidores | ✅ Validado | Sección 5.2 |
-| **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna | ✅ Validado | Sección 5.2 |
+| **RF-06** (Active Directory) | `nslookup tfg.vp`, autenticación de usuarios, resolución DNS interna, verificación de OUs, grupos y GPOs | ✅ Validado | Sección 5.2 y subsección debajo |
 | **RF-07** (Acceso VPN) | Conexión WireGuard, acceso a `10.0.2.0/24` y `172.16.3.0/24` desde cliente | ✅ Validado | Ver sección 5.4 |
 | **RF-08** (Gestión de alertas) | Alerta `InstanceDown` simulada y recepción en Telegram | ✅ Validado | Sección 5.2 |
 | **RF-09** (Acceso remoto) | SSH al Gateway (puerto 22), RDP al Windows mediante DNAT desde Internet (3389) | ✅ Validado | Conectividad verificada |
@@ -2378,6 +2378,26 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 *Figura: Cronograma de eventos de CloudFormation que acredita la creación automática de la VPC, subredes, Security Groups, instancias y volúmenes.*
 
 > **Nota:** Las pruebas de conectividad específicas (tracert, ping, nslookup, dashboards y alertas) se mantienen documentadas en la sección **5.2. Verificación y pruebas de conectividad** para no duplicar contenido del manual de implantación. Los resultados obtenidos fueron satisfactorios y acreditan el cumplimiento de RF-01, RF-05, RF-06, RF-08 y RF-09.
+
+#### Verificación de estructura de Active Directory (OUs, grupos y GPOs)
+
+El bootstrap automatizado creó correctamente la estructura de Unidades Organizativas, los grupos de seguridad y la GPO de firewall. Se verificaron mediante los siguientes comandos PowerShell:
+
+```powershell
+Get-ADOrganizationalUnit -Filter * -SearchBase "DC=tfg,DC=vp" | Select Name, DistinguishedName
+Select-String "redirigido" C:\tfg-bootstrap.log
+Get-ADGroup -Filter * -SearchBase "OU=Grupos,DC=tfg,DC=vp" | Select Name
+Get-GPO -Name "GPO_Seguridad_Equipos"
+Get-GPPermission -Name "GPO_Seguridad_Equipos" -All | Where-Object { $_.Trustee.Name -eq "Authenticated Users" }
+```
+
+![OUs y grupos de seguridad](imagenes/ous_grupos-seguridad-WS.png)
+
+*Figura: Estructura de OUs (`Usuarios`, `Equipos`, `Servidores`, `Grupos`, `Admins`) y grupos de seguridad (`GG_Usuarios`, `GG_Admins`, `GG_Portal-AD-Admins`) creados automáticamente por el script `bootstrap-windows.ps1`, junto con la confirmación de `redircmp` en el log de bootstrap.*
+
+![Directivas de grupo](imagenes/directivas.png)
+
+*Figura: Verificación de la GPO `GPO_Seguridad_Equipos` y sus permisos. El permiso `GpoApply` para *Authenticated Users* garantiza que los equipos del dominio puedan aplicar la política de firewall, solucionando el comportamiento por defecto post-KB3159398 (MS16-072).*
 
 ---
 
