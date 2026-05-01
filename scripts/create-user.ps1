@@ -31,13 +31,13 @@ function Write-JsonResponse {
 
 try {
     if ($env:REQUEST_METHOD -and $env:REQUEST_METHOD -ne 'POST') {
-        Write-JsonResponse -StatusCode 405 -Payload @{ ok = $false; error = 'Metodo no permitido. Usa POST.' }
+        Write-JsonResponse -StatusCode 405 -Payload @{ ok = $false; error = 'Método no permitido. Usa POST.' }
         exit 0
     }
 
     $rawBody = [Console]::In.ReadToEnd()
     if ([string]::IsNullOrWhiteSpace($rawBody)) {
-        Write-JsonResponse -StatusCode 400 -Payload @{ ok = $false; error = 'Body vacio.' }
+        Write-JsonResponse -StatusCode 400 -Payload @{ ok = $false; error = 'Body vacío.' }
         exit 0
     }
 

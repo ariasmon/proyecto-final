@@ -14,7 +14,7 @@ Parameters:
     Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
     Default: "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
   SafeModePassword:
-    Description: Contrasena del modo seguro de Active Directory (DSRM)
+    Description: Contraseña del modo seguro de Active Directory (DSRM)
     Type: String
     NoEcho: true
     MinLength: 8
@@ -73,7 +73,7 @@ Resources:
   SGGateway:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Gateway Ubuntu - SSH, WireGuard, Prometheus y trafico interno
+      GroupDescription: Gateway Ubuntu - SSH, WireGuard, Prometheus y tráfico interno
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -215,7 +215,7 @@ Resources:
               $ifIndex = $adapter.ifIndex
               Write-UDLog "Adaptador: $($adapter.Name) - ifIndex: $ifIndex"
           } else {
-              Write-UDLog "ERROR: No se encontro adaptador de red activo"
+              Write-UDLog "ERROR: No se encontró adaptador de red activo"
           }
 
           Write-UDLog "[3/5] Configurando IP estatica 10.0.2.75..."
@@ -384,7 +384,7 @@ Resources:
 
 Outputs:
   IPElasticaUbuntu:
-    Description: IP publica del Gateway (SSH/WireGuard)
+    Description: IP pública del Gateway (SSH/WireGuard)
     Value: !Ref ElasticIPGateway
   URIGrafana:
     Description: URL de acceso a Grafana (solo via VPN)

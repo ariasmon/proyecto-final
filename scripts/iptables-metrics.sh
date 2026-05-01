@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# iptables-metrics.sh - Recopila metricas de paquetes denegados por iptables para Prometheus
+# iptables-metrics.sh - Recopila métricas de paquetes denegados por iptables para Prometheus
 #
 
 TEXTFILE_DIR="/var/lib/prometheus/node-exporter"

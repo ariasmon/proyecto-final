@@ -419,7 +419,7 @@ El Security Group del Gateway define las reglas de acceso perimetral:
 SGGateway:
   Type: AWS::EC2::SecurityGroup
   Properties:
-    GroupDescription: Gateway Ubuntu - SSH, RDP (DNAT), WireGuard, Prometheus y trafico interno
+    GroupDescription: Gateway Ubuntu - SSH, RDP (DNAT), WireGuard, Prometheus y tráfico interno
     VpcId: !Ref VPC
     SecurityGroupIngress:
       - IpProtocol: tcp
@@ -620,7 +620,7 @@ Para permitir el acceso remoto seguro de usuarios a la infraestructura desde fue
 La configuración permite que los clientes VPN accedan a:
 - **Subred privada** (`10.0.2.0/24`): Active Directory y otros recursos internos
 - **Subred VPN** (`172.16.3.0/24`): Comunicación entre clientes conectados
-- **Internet**: Todo el tráfico de los clientes VPN se natetea a través del Gateway Ubuntu
+- **Internet**: Todo el tráfico de los clientes VPN se natea a través del Gateway Ubuntu
 
 > **Nota:** En el entorno de AWS Academy, el tráfico de retorno de la VPN WireGuard hacia los clientes externos no está permitido, lo que impide el acceso funcional al Windows Server y otros recursos de la subred privada mediante conexión VPN. El acceso al Windows Server se realiza mediante DNAT desde Internet (puerto 3389/TCP).
 
@@ -1695,7 +1695,7 @@ El endpoint `POST /api/create-user.ps1` permite crear usuarios en Active Directo
   "Surname": "García",
   "DisplayName": "Juan García",
   "UserPrincipalName": "jgarcia@tfg.vp",
-  "Password": "Contrasena$egura1",
+  "Password": "Contraseña$egura1",
   "Mail": "jgarcia@tfg.vp",
   "Department": "IT",
   "OU": "OU=Usuarios,DC=tfg,DC=vp",

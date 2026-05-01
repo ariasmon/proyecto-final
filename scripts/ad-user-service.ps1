@@ -111,19 +111,19 @@ function New-AdUserFromPayload {
     $targetOu = if ([string]::IsNullOrWhiteSpace([string]$Payload.OU)) { $DefaultOU } else { [string]$Payload.OU }
 
     if ($sam -notmatch '^[a-zA-Z][a-zA-Z0-9._-]{2,30}$') {
-        throw 'SamAccountName invalido. Usa 3-31 caracteres alfanumericos, punto, guion o guion bajo.'
+        throw 'SamAccountName inválido. Usa 3-31 caracteres alfanumericos, punto, guion o guion bajo.'
     }
 
     if ($upn -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
-        throw 'UserPrincipalName invalido.'
+        throw 'UserPrincipalName inválido.'
     }
 
     if (-not (Test-PasswordPolicy -Password $password)) {
-        throw 'La contrasena no cumple politica minima: 10 caracteres, mayuscula, minuscula, numero y simbolo.'
+        throw 'La contraseña no cumple política mínima: 10 caracteres, mayuscula, minuscula, numero y simbolo.'
     }
 
     if ($targetOu -notmatch '^OU=.+,DC=.+') {
-        throw 'OU invalida. Debe tener formato LDAP (ejemplo: OU=Usuarios,DC=tfg,DC=vp).'
+        throw 'OU inválida. Debe tener formato LDAP (ejemplo: OU=Usuarios,DC=tfg,DC=vp).'
     }
 
     $existing = Get-ADUser -Filter "SamAccountName -eq '$sam'" -ErrorAction SilentlyContinue

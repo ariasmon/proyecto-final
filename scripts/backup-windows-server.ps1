@@ -47,7 +47,7 @@ function Ensure-Directory {
 
     if (-not (Test-Path -LiteralPath $Path)) {
         if ($DryRun) {
-            Write-Log "[DryRun] Se crearia la carpeta: $Path"
+            Write-Log "[DryRun] Se crearía la carpeta: $Path"
         } else {
             New-Item -ItemType Directory -Path $Path -Force | Out-Null
         }
@@ -87,7 +87,7 @@ function Read-IntWithDefault {
             return $parsed
         }
 
-        Write-Host "Valor invalido. Debe ser un numero entre $MinValue y $MaxValue."
+        Write-Host "Valor inválido. Debe ser un número entre $MinValue y $MaxValue."
     }
 }
 
@@ -108,14 +108,14 @@ function Read-TimeWithDefault {
             return $candidate
         }
 
-        Write-Host "Formato invalido. Usa HH:mm (ej. 03:00)."
+        Write-Host "Formato inválido. Usa HH:mm (ej. 03:00)."
     }
 }
 
 function Read-ListFromInput {
     param([Parameter(Mandatory = $true)][string]$Prompt)
 
-    $raw = Read-Host "$Prompt (separa por coma, vacio para ninguno)"
+    $raw = Read-Host "$Prompt (separa por coma, vacío para ninguno)"
     if ([string]::IsNullOrWhiteSpace($raw)) {
         return @()
     }
@@ -195,7 +195,7 @@ function Read-VolumeSelectionFromSystem {
             return @($selected)
         }
 
-        Write-Host "Seleccion invalida. Ejemplos: 1,2 o A"
+        Write-Host "Selección inválida. Ejemplos: 1,2 o A"
     }
 }
 
@@ -220,7 +220,7 @@ function Read-YesNo {
             "N" { return $false }
             "NO" { return $false }
             default {
-                Write-Host "Opcion invalida. Usa S o N."
+                Write-Host "Opción inválida. Usa S o N."
             }
         }
     }
@@ -322,7 +322,7 @@ function Register-BackupScheduledTask {
             $arguments += @("/SC", "MONTHLY", "/D", "$dayNumber")
         }
         default {
-            throw "Frecuencia de tarea no valida: $frequency"
+            throw "Frecuencia de tarea no válida: $frequency"
         }
     }
 
@@ -387,7 +387,7 @@ function New-InteractiveConfig {
 
         $path = Read-Host "Ruta de origen (ej. C:\inetpub\wwwroot)"
         if ([string]::IsNullOrWhiteSpace($path)) {
-            Write-Host "Ruta vacia. Se omite este origen."
+            Write-Host "Ruta vacía. Se omite este origen."
             continue
         }
 
@@ -509,7 +509,7 @@ function Invoke-SystemStateBackup {
     }
 
     if (-not $Config.SystemStateTarget) {
-        throw "EnableSystemStateBackup esta activo pero falta SystemStateTarget en la configuracion."
+        throw "EnableSystemStateBackup está activo pero falta SystemStateTarget en la configuración."
     }
 
     $command = "wbadmin start systemstatebackup -backuptarget:$($Config.SystemStateTarget) -quiet"
@@ -544,7 +544,7 @@ function Invoke-FullDiskBackup {
 
     $target = if ($Config.FullDiskBackup.BackupTarget) { [string]$Config.FullDiskBackup.BackupTarget } else { "" }
     if ([string]::IsNullOrWhiteSpace($target)) {
-        throw "Copia completa activada pero falta FullDiskBackup.BackupTarget en la configuracion."
+        throw "Copia completa activada pero falta FullDiskBackup.BackupTarget en la configuración."
     }
 
     $useAllCritical = $true
@@ -567,7 +567,7 @@ function Invoke-FullDiskBackup {
     $command += " -quiet"
 
     if (-not $useAllCritical -and $includeVolumes.Count -eq 0) {
-        throw "Copia completa activada sin volumenes. Activa UseAllCritical o define IncludeVolumes."
+        throw "Copia completa activada sin volúmenes. Activa UseAllCritical o define IncludeVolumes."
     }
 
     if ($DryRun) {
@@ -582,7 +582,7 @@ function Invoke-FullDiskBackup {
         }
     }
     if ($LASTEXITCODE -ne 0) {
-        throw "wbadmin (copia completa) devolvio codigo $LASTEXITCODE"
+        throw "wbadmin (copia completa) devolvió código $LASTEXITCODE"
     }
 
     Write-Log "Copia completa de disco finalizada correctamente."
@@ -607,10 +607,10 @@ function Invoke-RetentionPolicy {
         foreach ($dir in $backupDirs) {
             if ($dir.LastWriteTime -lt $limitDate) {
                 if ($DryRun) {
-                    Write-Log "[DryRun] Se eliminaria por antiguedad: $($dir.FullName)"
+                    Write-Log "[DryRun] Se eliminaría por antigüedad: $($dir.FullName)"
                 } else {
                     Remove-Item -LiteralPath $dir.FullName -Recurse -Force
-                    Write-Log "Eliminado por antiguedad: $($dir.FullName)"
+                    Write-Log "Eliminado por antigüedad: $($dir.FullName)"
                 }
             }
         }
@@ -624,10 +624,10 @@ function Invoke-RetentionPolicy {
             $toDelete = $remaining | Select-Object -Skip $MaxBackupSets
             foreach ($dir in $toDelete) {
                 if ($DryRun) {
-                    Write-Log "[DryRun] Se eliminaria por limite de copias: $($dir.FullName)"
+                    Write-Log "[DryRun] Se eliminaría por límite de copias: $($dir.FullName)"
                 } else {
                     Remove-Item -LiteralPath $dir.FullName -Recurse -Force
-                    Write-Log "Eliminado por limite de copias: $($dir.FullName)"
+                    Write-Log "Eliminado por límite de copias: $($dir.FullName)"
                 }
             }
         }
@@ -639,19 +639,19 @@ try {
     if ($Interactive) {
         $config = New-InteractiveConfig
 
-        if (Read-YesNo -Prompt "Guardar esta configuracion para futuras ejecuciones" -DefaultValue $true) {
+        if (Read-YesNo -Prompt "Guardar esta configuración para futuras ejecuciones" -DefaultValue $true) {
             $config | ConvertTo-Json -Depth 8 | Out-File -FilePath $ConfigPath -Encoding UTF8
             Write-Host "Configuracion guardada en: $ConfigPath"
         }
     } else {
         if (-not (Test-Path -LiteralPath $ConfigPath)) {
-            throw "No se encontro el archivo de configuracion: $ConfigPath. Usa -Interactive para crearla de forma guiada."
+            throw "No se encontró el archivo de configuración: $ConfigPath. Usa -Interactive para crearla de forma guiada."
         }
         $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     }
 
     if (-not $config.DestinationRoot) {
-        throw "Falta DestinationRoot en la configuracion."
+        throw "Falta DestinationRoot en la configuración."
     }
     $hasFullDiskBackup = $false
     if ($config.PSObject.Properties.Name -contains "FullDiskBackup" -and $config.FullDiskBackup) {
@@ -708,7 +708,7 @@ try {
     $hasErrors = $false
     foreach ($source in $config.Sources) {
         if (-not $source.Path) {
-            Write-Log "Origen sin Path detectado en configuracion, se omite." "WARN"
+            Write-Log "Origen sin Path detectado en configuración, se omite." "WARN"
             continue
         }
 
@@ -753,7 +753,7 @@ try {
     Invoke-RetentionPolicy -DestinationRoot $config.DestinationRoot -RetentionDays $retentionDays -MaxBackupSets $maxBackupSets
 
     if ($hasErrors) {
-        Write-Log "Backup finalizado con errores en uno o mas origenes." "ERROR"
+        Write-Log "Backup finalizado con errores en uno o más orígenes." "ERROR"
         exit 2
     }
 

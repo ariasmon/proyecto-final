@@ -6,7 +6,7 @@ param(
 
 Import-Module WebAdministration -ErrorAction Stop
 
-Write-Host 'Habilitando modulos IIS requeridos...'
+Write-Host 'Habilitando módulos IIS requeridos...'
 Install-WindowsFeature Web-CGI, Web-Windows-Auth -IncludeManagementTools | Out-Null
 
 if (-not (Test-Path "IIS:\Sites\$SiteName")) {
@@ -19,10 +19,10 @@ if (-not (Test-Path $ApiPhysicalPath)) {
 
 if (-not (Test-Path "IIS:\Sites\$SiteName\api")) {
     New-WebApplication -Site $SiteName -Name 'api' -PhysicalPath $ApiPhysicalPath -ApplicationPool 'DefaultAppPool' | Out-Null
-    Write-Host "Aplicacion /api creada en sitio $SiteName"
+    Write-Host "Aplicación /api creada en sitio $SiteName"
 } else {
     Set-ItemProperty "IIS:\Sites\$SiteName\api" -Name physicalPath -Value $ApiPhysicalPath
-    Write-Host 'Aplicacion /api ya existente, path actualizado.'
+    Write-Host 'Aplicación /api ya existente, path actualizado.'
 }
 
 Set-WebConfigurationProperty -PSPath IIS:\ -Filter /system.webServer/security/authentication/anonymousAuthentication -Name enabled -Value False -Location "$SiteName/api"
@@ -40,7 +40,7 @@ icacls (Split-Path $AuditLogPath -Parent) /grant "IUSR:(OI)(CI)M" | Out-Null
 
 $serviceScript = Join-Path $PSScriptRoot 'ad-user-service.ps1'
 if (-not (Test-Path $serviceScript)) {
-    throw "No se encontro '$serviceScript'. Asegurate de que ad-user-service.ps1 esta en el mismo directorio que configurar-api-alta-ad.ps1."
+    throw "No se encontró '$serviceScript'. Asegurate de que ad-user-service.ps1 esta en el mismo directorio que configurar-api-alta-ad.ps1."
 }
 Copy-Item -Path $serviceScript -Destination $ApiPhysicalPath -Force
 Write-Host "ad-user-service.ps1 copiado a $ApiPhysicalPath"

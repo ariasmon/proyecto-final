@@ -216,10 +216,10 @@
         <option value="user_desc">Orden: Usuario Z-A</option>
       </select>
       <select id="pageSizeFilter" class="select">
-        <option value="10">10 por pagina</option>
-        <option value="25" selected>25 por pagina</option>
-        <option value="50">50 por pagina</option>
-        <option value="100">100 por pagina</option>
+        <option value="10">10 por página</option>
+        <option value="25" selected>25 por página</option>
+        <option value="50">50 por página</option>
+        <option value="100">100 por página</option>
       </select>
     </div>
 
@@ -228,7 +228,7 @@
     <div class="summary">
       <span id="totalChip" class="chip">Total: 0</span>
       <span id="filteredChip" class="chip">Mostrando: 0</span>
-      <span id="syncChip" class="chip">Ultima sincronizacion: --</span>
+      <span id="syncChip" class="chip">Última sincronización: --</span>
     </div>
 
     <table>
@@ -259,7 +259,7 @@
     </div>
 
     <div class="hint">
-      Esta pagina no consulta AD directamente desde el navegador por seguridad.
+      Esta página no consulta AD directamente desde el navegador por seguridad.
       IIS debe servir el archivo ad-users.json generado en el servidor con permisos de Active Directory.
     </div>
   </div>
@@ -377,7 +377,7 @@
       const start = (currentPage - 1) * pageSize;
       const pageUsers = users.slice(start, start + pageSize);
 
-      pageInfo.textContent = 'Pagina ' + currentPage + ' de ' + totalPages;
+      pageInfo.textContent = 'Página ' + currentPage + ' de ' + totalPages;
       prevBtn.disabled = currentPage <= 1;
       nextBtn.disabled = currentPage >= totalPages;
       return pageUsers;
@@ -450,7 +450,7 @@
         allUsers = Array.isArray(data) ? data : [];
         fillDepartmentFilter(allUsers);
         runQuery(true);
-        syncChip.textContent = 'Ultima sincronizacion: ' + formatSyncDate(response.headers.get('last-modified'));
+        syncChip.textContent = 'Última sincronización: ' + formatSyncDate(response.headers.get('last-modified'));
         statusEl.textContent = 'Usuarios cargados correctamente';
       } catch (error) {
         allUsers = [];

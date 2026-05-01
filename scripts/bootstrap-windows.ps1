@@ -468,7 +468,7 @@ try {
     if (-not $existingGpo) {
         New-GPO -Name $gpoName -Comment "Política de firewall para equipos del dominio" | Out-Null
         Set-GPPermission -Name $gpoName -TargetName "Authenticated Users" -TargetType Group -Permission GpoApply | Out-Null
-        Write-Log "  GPO '$gpoName' creada con permisos de aplicacion para Authenticated Users."
+        Write-Log "  GPO '$gpoName' creada con permisos de aplicación para Authenticated Users."
     } else {
         Write-Log "  GPO '$gpoName' ya existe, omitiendo creación."
     }
