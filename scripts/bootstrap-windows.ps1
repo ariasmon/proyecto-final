@@ -382,39 +382,68 @@ try {
 }
 
 # ------------------------------------------------------------------
-# 8. Crear estructura de OUs
+# 8. Esperar a que AD DS esté listo y crear estructura de OUs
 # ------------------------------------------------------------------
-Write-Log "[8/16] Creando estructura de OUs..."
-$ouList = @("Usuarios", "Equipos", "Servidores", "Grupos", "Admins")
-foreach ($ou in $ouList) {
-    $ouPath = "OU=$ou,DC=tfg,DC=vp"
+Write-Log "[8/16] Esperando a que AD DS esté listo..."
+$adReady = $false
+$adRetries = 30
+for ($i = 1; $i -le $adRetries; $i++) {
     try {
-        Get-ADOrganizationalUnit -Identity $ouPath -ErrorAction Stop | Out-Null
-        Write-Log "OU '$ou' ya existe."
+        Get-ADDomain -ErrorAction Stop | Out-Null
+        $adReady = $true
+        Write-Log "AD DS listo (intento $i/$adRetries)."
+        break
     } catch {
-        New-ADOrganizationalUnit -Name $ou -Path "DC=tfg,DC=vp" -ErrorAction Stop | Out-Null
-        Write-Log "OU '$ou' creada."
+        Write-Log "AD DS no disponible, intento $i/$adRetries..."
+        Start-Sleep -Seconds 10
     }
+}
+if (-not $adReady) {
+    Write-Log "ERROR: AD DS no se encontró disponible tras 5 minutos. Abortando."
+    exit 1
+}
+
+Write-Log "[8/16] Creando estructura de OUs..."
+try {
+    $ouList = @("Usuarios", "Equipos", "Servidores", "Grupos", "Admins")
+    foreach ($ou in $ouList) {
+        $ouPath = "OU=$ou,DC=tfg,DC=vp"
+        try {
+            Get-ADOrganizationalUnit -Identity $ouPath -ErrorAction Stop | Out-Null
+            Write-Log "OU '$ou' ya existe."
+        } catch {
+            New-ADOrganizationalUnit -Name $ou -Path "DC=tfg,DC=vp" -ErrorAction Stop | Out-Null
+            Write-Log "OU '$ou' creada."
+        }
+    }
+    redircmp "OU=Equipos,DC=tfg,DC=vp"
+    Write-Log "Contenedor por defecto de equipos redirigido a OU=Equipos."
+} catch {
+    Write-Log "ADVERTENCIA: No se pudieron crear las OUs: $($_.Exception.Message)"
 }
 
 # ------------------------------------------------------------------
 # 9. Crear grupos de seguridad
 # ------------------------------------------------------------------
 Write-Log "[9/16] Creando grupos de seguridad..."
-$groupsOU = "OU=Grupos,DC=tfg,DC=vp"
-$groups = @(
-    @{ Name = "GG_Usuarios"; Description = "Grupo global de usuarios del dominio" },
-    @{ Name = "GG_Admins"; Description = "Grupo global de administradores" },
-    @{ Name = "GG_Portal-AD-Admins"; Description = "Administradores del portal AD (API altas)" }
-)
-foreach ($g in $groups) {
-    try {
-        Get-ADGroup -Identity $g.Name -ErrorAction Stop | Out-Null
-        Write-Log "Grupo '$($g.Name)' ya existe."
-    } catch {
-        New-ADGroup -Name $g.Name -SamAccountName $g.Name -GroupCategory Security -GroupScope Global -Path $groupsOU -Description $g.Description | Out-Null
-        Write-Log "Grupo '$($g.Name)' creado."
+try {
+    $groupsOU = "OU=Grupos,DC=tfg,DC=vp"
+    $groups = @(
+        @{ Name = "GG_Usuarios"; Description = "Grupo global de usuarios del dominio" },
+        @{ Name = "GG_Admins"; Description = "Grupo global de administradores" },
+        @{ Name = "GG_Portal-AD-Admins"; Description = "Administradores del portal AD (API altas)" }
+    )
+    foreach ($g in $groups) {
+        try {
+            Get-ADGroup -Identity $g.Name -ErrorAction Stop | Out-Null
+            Write-Log "Grupo '$($g.Name)' ya existe."
+        } catch {
+            New-ADGroup -Name $g.Name -SamAccountName $g.Name -GroupCategory Security -GroupScope Global -Path $groupsOU -Description $g.Description | Out-Null
+            Write-Log "Grupo '$($g.Name)' creado."
+        }
     }
+} catch {
+    Write-Log "ADVERTENCIA: No se pudieron crear los grupos de seguridad: $($_.Exception.Message)"
 }
 
 # ------------------------------------------------------------------
@@ -438,7 +467,8 @@ try {
     $existingGpo = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
     if (-not $existingGpo) {
         New-GPO -Name $gpoName -Comment "Política de firewall para equipos del dominio" | Out-Null
-        Write-Log "  GPO '$gpoName' creada."
+        Set-GPPermission -Name $gpoName -TargetName "Authenticated Users" -TargetType Group -Permission GpoApply | Out-Null
+        Write-Log "  GPO '$gpoName' creada con permisos de aplicacion para Authenticated Users."
     } else {
         Write-Log "  GPO '$gpoName' ya existe, omitiendo creación."
     }

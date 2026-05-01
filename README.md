@@ -1338,7 +1338,7 @@ Esta estructura permite una gestión de permisos escalable y facilita la adminis
 
 #### GPO implementadas
 
-> **Nota de automatización:** Las GPOs de contraseñas y firewall de equipos, así como las políticas de auditoría, se configuran automáticamente durante el despliegue mediante el script `bootstrap-windows.ps1` (véase la sección 4.20, paso 5). La sección siguiente describe la configuración que se aplica de forma automática.
+> **Nota de automatización:** Las GPOs de contraseñas y firewall de equipos, así como las políticas de auditoría, se configuran automáticamente durante el despliegue mediante el script `bootstrap-windows.ps1` (véase la sección 4.19, paso 5). La sección siguiente describe la configuración que se aplica de forma automática.
 
 Se crean y vinculan a las OUs correspondientes las siguientes políticas de grupo:
 
@@ -1370,6 +1370,22 @@ Se aplica a la OU `Equipos` mediante `New-GPO`, `Set-GPRegistryValue` y `New-GPL
 > 
 > La GPO `GPO_Seguridad_Equipos` aplica a **equipos clientes** que se unan al dominio corporativo (por ejemplo, portátiles conectados vía VPN), donde sí es necesario mantener el firewall activado para proteger los dispositivos individuales.
 
+**Permisos de aplicación de la GPO:**
+
+Tras la actualización de seguridad [KB3159398 (MS16-072)](https://support.microsoft.com/en-us/topic/microsoft-security-advisory-motion-of-group-policy-preference-passwords-june-14-2016-8b22defe-c2cb-1ed7-43e0-d2dbb9856f5b), las GPOs creadas mediante `New-GPO` otorgan únicamente permiso de **lectura** a *Authenticated Users*, pero no permiso de **aplicación** (`GpoApply`). Por ello, el script `bootstrap-windows.ps1` ejecuta `Set-GPPermission` tras crear la GPO, garantizando que los equipos del dominio puedan aplicarla correctamente:
+
+```powershell
+Set-GPPermission -Name "GPO_Seguridad_Equipos" -TargetName "Authenticated Users" -TargetType Group -Permission GpoApply
+```
+
+**Redirección del contenedor de equipos:**
+
+Por defecto, los equipos que se unen al dominio se colocan en el contenedor `CN=Computers`. Para que la GPO `GPO_Seguridad_Equipos` (vinculada a `OU=Equipos`) se aplique automáticamente a los nuevos equipos, el bootstrap ejecuta `redircmp` para redirigir el contenedor por defecto:
+
+```powershell
+redircmp "OU=Equipos,DC=tfg,DC=vp"
+```
+
 #### Observaciones y buenas prácticas
 
 1. **Contenedores por defecto:** Se mantuvieron los grupos por defecto del dominio en el contenedor `Users` sin modificaciones, evitando problemas de herencia y permisos.
@@ -1384,7 +1400,7 @@ Se aplica a la OU `Equipos` mediante `New-GPO`, `Set-GPRegistryValue` y `New-GPL
 
 ### 4.14. Auditoría de seguridad y Sysmon
 
-> **Nota de automatización:** Las políticas de auditoría se configuran automáticamente durante el despliegue mediante el script `bootstrap-windows.ps1` (véase la sección 4.20, paso 5c). Se utilizan comandos `auditpol` directamente en el controlador de dominio, lo cual es funcionalmente equivalente a configurarlas vía GPO en un entorno de un solo DC.
+> **Nota de automatización:** Las políticas de auditoría se configuran automáticamente durante el despliegue mediante el script `bootstrap-windows.ps1` (véase la sección 4.19, paso 5c). Se utilizan comandos `auditpol` directamente en el controlador de dominio, lo cual es funcionalmente equivalente a configurarlas vía GPO en un entorno de un solo DC.
 
 Con el objetivo de reforzar la trazabilidad del Windows Server, se habilitaron políticas de auditoría del sistema y se instaló **Sysmon** como herramienta complementaria de monitorización de eventos avanzados.
 
@@ -2146,9 +2162,9 @@ Tras el reinicio provocado por la promoción a DC, la ScheduledTask `TFG-Stage2`
 | 1 | DNS forwarders | `8.8.8.8` y `8.8.4.4` en el servidor DNS de AD |
 | 2 | DNS del adaptador | Cambiar a `127.0.0.1` + `8.8.8.8` (AD DNS ya disponible) |
 | 2b | Habilitar RDP | Verificar `fDenyTSConnections=0`, servicio TermService y regla firewall 3389/TCP |
-| 3 | Estructura de OUs | `Usuarios`, `Equipos`, `Servidores`, `Grupos`, `Admins` bajo `DC=tfg,DC=vp` |
+| 3 | Estructura de OUs | Espera activa de AD DS (`Get-ADDomain`, max 5 min), creacion de OUs `Usuarios`, `Equipos`, `Servidores`, `Grupos`, `Admins`; `redircmp` redirige equipos nuevos a `OU=Equipos` |
 | 4 | Grupos de seguridad | `GG_Usuarios`, `GG_Admins`, `GG_Portal-AD-Admins` en `OU=Grupos,DC=tfg,DC=vp` |
-| 5 | Políticas de contraseñas, GPO y auditoría | `Set-ADDefaultDomainPasswordPolicy` (longitud mín. 8, complejidad, historial 24), `New-GPO` + `Set-GPRegistryValue` para `GPO_Seguridad_Equipos` (firewall habilitado, inbound bloqueado) vinculada a `OU=Equipos`, y `auditpol` para políticas de auditoría (Logon, Logoff, Account Lockout, User Account Management, Security Group Management, Directory Service Access, File Share, Process Creation) |
+| 5 | Políticas de contraseñas, GPO y auditoría | `Set-ADDefaultDomainPasswordPolicy` (longitud mín. 8, complejidad, historial 24), `New-GPO` + `Set-GPRegistryValue` + `Set-GPPermission` (permiso `GpoApply` para *Authenticated Users*, requerido tras KB3159398) para `GPO_Seguridad_Equipos` (firewall habilitado, inbound bloqueado) vinculada a `OU=Equipos`, y `auditpol` para políticas de auditoría (Logon, Logoff, Account Lockout, User Account Management, Security Group Management, Directory Service Access, File Share, Process Creation) |
 | 6 | Instalar Sysmon | Con `sysmonconfig.xml` del repositorio clonado |
 | 7 | IIS: sitio MiSitio | Crear sitio, copiar `Pagina IIS/*` a `C:\inetpub\wwwroot\misitio\`, eliminar Default Web Site |
 | 8 | API `/api` | Directorio `api\` con `ad-user-service.ps1`, `create-user.ps1` y `web.config`; webapp en IIS; Win Auth habilitada, Anonymous deshabilitada; permisos `IIS_IUSRS`/`IUSR` en directorio de logs |
