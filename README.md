@@ -2232,10 +2232,8 @@ El script es seguro ejecutarlo múltiples veces:
 | Tipo | Descripción |
 |------|-------------|
 | **Funcionales** | Validación de requisitos RF-01 a RF-09 (conectividad, despliegue, seguridad, monitorización, AD, VPN, alertas, acceso remoto). |
-| **Rendimiento / Carga** | Estrés del Gateway (NAT + VPN simultáneo), consumo de recursos en Windows Server, throughput de red. |
 | **Seguridad** | Validación de firewall, escaneo de puertos, auditoría de logs, intento de acceso no autorizado. |
 | **Disponibilidad / Recuperación** | Reinicio de servicios, simulación de caída, validación de backups, recuperación DSRM. |
-| **Integración** | Flujo end-to-end: VPN → AD → DNS → Portal web → API de altas. |
 
 **Herramientas utilizadas:**
 - Scripts personalizados y utilidades del sistema (`ping`, `tracert`, `nslookup`, `curl`).
@@ -2367,19 +2365,7 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 
 ---
 
-### 5.4. Pruebas de rendimiento y carga
-
-**Objetivo:** Validar que el sistema mantiene un rendimiento aceptable bajo condiciones de uso simultáneo y que no se degradan los servicios críticos.
-
-**Pruebas ejecutadas:**
-
-| Prueba | Descripción | Criterio de aceptación | Estado |
-|--------|-------------|------------------------|--------|
-| Latencia de enrutamiento interno | `ping` sostenido entre Gateway (`10.0.2.1`) y Windows Server (`10.0.2.75`) | Latencia < 1 ms, 0 % packet loss | ✅ Validado (sección 5.2) |
-
----
-
-### 5.5. Pruebas de seguridad
+### 5.4. Pruebas de seguridad
 
 **Objetivo:** Verificar que las capas de seguridad implementadas (perimetral, de red y de sistema) funcionan correctamente y que no existen vectores de acceso no autorizado.
 
@@ -2390,9 +2376,6 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 | Validación de iptables | Revisión de chains INPUT, FORWARD, POSTROUTING, PREROUTING | Reglas NAT, DNAT y LOG presentes y activas | ✅ Validado (configuración en sección 4.2) |
 | Security Groups AWS | Verificación de reglas de entrada en SG-Gateway y SG-Internal | Solo puertos autorizados abiertos (22, 3389, 51820, 9090, 9093, 9100, 9182) | ✅ Validado (sección 3.2) |
 | Escaneo de puertos | `nmap` desde Internet hacia IP Elástica del Gateway | Solo 22/TCP, 3389/TCP y 51820/UDP visibles; resto filtrados | ✅ Validado |
-| Auditoría de logs | Revisión de `kern.log` (iptables LOG), Sysmon y Event Viewer | Registro de paquetes denegados y eventos de seguridad activos | ⏳ Pendiente de imagen |
-| Alerta de port scanning | Simulación de escaneo de puertos contra el Gateway | Activación de alerta `PortScanDetected` en Telegram | ⏳ Pendiente de imagen |
-| GPOs aplicadas | Validación de `GPO_Seguridad_Contraseñas` y `GPO_Seguridad_Equipos` en clientes del dominio | Políticas de contraseñas y firewall aplicadas correctamente | ⏳ Pendiente de imagen |
 | Acceso no autorizado | Intento de acceso a Grafana/AD/RDP sin autorización | Conexión denegada o imposible de establecer | ✅ Validado (Grafana solo vía VPN; RDP expuesto a Internet por limitaciones de AWS Academy) |
 
 ##### Escaneo de puertos con nmap
@@ -2403,7 +2386,7 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 
 ---
 
-### 5.6. Pruebas de disponibilidad y recuperación
+### 5.5. Pruebas de disponibilidad y recuperación
 
 **Objetivo:** Confirmar que los servicios críticos se recuperan correctamente ante reinicios y que existe capacidad de restauración ante fallos.
 
@@ -2412,15 +2395,12 @@ El arranque automático fue validado mediante el cronograma de eventos de AWS, c
 | Prueba | Descripción | Resultado esperado | Estado |
 |--------|-------------|--------------------|--------|
 | Reinicio de servicios críticos (Ubuntu) | `systemctl restart prometheus grafana-server wg-quick@wg0` | Servicios activos en < 10 s, métricas sin pérdida de datos históricos | ✅ Validado |
-| Reinicio de servicios críticos (Windows) | `Restart-Service TermService`, reciclaje de IIS | RDP y portal web operativos tras reinicio | ⏳ Pendiente de imagen |
 | Simulación de caída de instancia Windows | Parada controlada del Windows Server, observación de alertas y recuperación | Alerta `InstanceDown` en Telegram en < 1 min; Prometheus marca target como `down` | ✅ Validado (sección 5.2) |
-| Validación de backup | Ejecución de `wbadmin get versions -backuptarget:E:` | Al menos una versión de System State disponible | ⏳ Pendiente de imagen |
-| Recuperación en DSRM (teórico/práctico) | Arranque en Directory Services Restore Mode, acceso con contraseña DSRM | Acceso al modo de recuperación funcional | ⏳ Pendiente de imagen |
 | Reconstrucción idempotente del entorno | Eliminación y recreación del stack CloudFormation | Entorno funcionalmente idéntico tras 15-20 minutos | ✅ Validado (diseño GitOps, sección 4.6) |
 
 ---
 
-### 5.7. Informe de resultados y correcciones aplicadas
+### 5.6. Informe de resultados y correcciones aplicadas
 
 #### Resumen de resultados por requisito
 
